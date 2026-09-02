@@ -76,9 +76,9 @@ function revalidateEverywhere() {
 // Auth — login/logout de dueños, registro de una cuenta nueva, superadmin
 // ---------------------------------------------------------------------------
 
-export async function loginAction(email: string, password: string) {
+export async function loginAction(email: string, password: string): Promise<{ error: string } | void> {
   const employee = verifyEmployeeCredentials(email, password);
-  if (!employee) throw new Error("Email o contraseña incorrectos");
+  if (!employee) return { error: "Email o contraseña incorrectos" };
   const token = newSessionToken({ kind: "employee", employeeId: employee.id, organizationId: employee.organizationId });
   await setEmployeeSession(token);
   redirect("/admin");
@@ -95,22 +95,27 @@ export async function signupAction(input: {
   ownerEmail: string;
   ownerPassword: string;
   planId: PlanId;
-}) {
-  const { organization, owner } = createOrganization({
-    name: input.orgName,
-    ownerName: input.ownerName,
-    ownerEmail: input.ownerEmail,
-    ownerPassword: input.ownerPassword,
-    planId: input.planId,
-  });
+}): Promise<{ error: string } | void> {
+  let organization, owner;
+  try {
+    ({ organization, owner } = createOrganization({
+      name: input.orgName,
+      ownerName: input.ownerName,
+      ownerEmail: input.ownerEmail,
+      ownerPassword: input.ownerPassword,
+      planId: input.planId,
+    }));
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "No se pudo crear la cuenta" };
+  }
   const token = newSessionToken({ kind: "employee", employeeId: owner.id, organizationId: organization.id });
   await setEmployeeSession(token);
   redirect("/admin");
 }
 
-export async function superadminLoginAction(email: string, password: string) {
+export async function superadminLoginAction(email: string, password: string): Promise<{ error: string } | void> {
   const admin = verifyPlatformAdminCredentials(email, password);
-  if (!admin) throw new Error("Email o contraseña incorrectos");
+  if (!admin) return { error: "Email o contraseña incorrectos" };
   const token = newSessionToken({ kind: "superadmin", adminId: admin.id });
   await setSuperadminSession(token);
   redirect("/superadmin");

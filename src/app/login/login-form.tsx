@@ -14,11 +14,8 @@ export function LoginForm() {
     if (!email || !password) return;
     setError(null);
     startTransition(async () => {
-      try {
-        await loginAction(email, password);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "No se pudo iniciar sesión");
-      }
+      const result = await loginAction(email, password);
+      if (result?.error) setError(result.error);
     });
   }
 

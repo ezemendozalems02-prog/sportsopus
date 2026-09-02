@@ -22,11 +22,8 @@ export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan:
     if (!canSubmit) return;
     setError(null);
     startTransition(async () => {
-      try {
-        await signupAction({ orgName, ownerName, ownerEmail, ownerPassword, planId });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "No se pudo crear la cuenta");
-      }
+      const result = await signupAction({ orgName, ownerName, ownerEmail, ownerPassword, planId });
+      if (result?.error) setError(result.error);
     });
   }
 

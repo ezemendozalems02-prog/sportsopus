@@ -13,11 +13,8 @@ export function SuperadminLoginForm() {
     if (!email || !password) return;
     setError(null);
     startTransition(async () => {
-      try {
-        await superadminLoginAction(email, password);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "No se pudo iniciar sesión");
-      }
+      const result = await superadminLoginAction(email, password);
+      if (result?.error) setError(result.error);
     });
   }
 
