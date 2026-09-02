@@ -1,15 +1,18 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getTournament, listMatchesForTournament, listTeamsForTournament } from "@/lib/db";
+import { getOrganizationBySlug, getTournament, listMatchesForTournament, listTeamsForTournament } from "@/lib/db";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card } from "@/components/ui";
 import { BracketView } from "@/components/bracket";
 import { RegisterTeamForm } from "./register-form";
 
-export default async function TorneoDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const tournament = getTournament(id);
+export default async function TorneoDetailPage({ params }: { params: Promise<{ orgSlug: string; id: string }> }) {
+  const { orgSlug, id } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const tournament = getTournament(org.id, id);
   if (!tournament) notFound();
 
   const teams = listTeamsForTournament(id);
@@ -17,7 +20,7 @@ export default async function TorneoDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div>
-      <Link href="/torneos" className="text-sm text-zinc-500 dark:text-zinc-400">
+      <Link href={`/${orgSlug}/torneos`} className="text-sm text-zinc-500 dark:text-zinc-400">
         ← Torneos
       </Link>
       <h1 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-zinc-50">{tournament.name}</h1>
@@ -42,7 +45,7 @@ export default async function TorneoDetailPage({ params }: { params: Promise<{ i
 
       {tournament.status === "inscripcion" && teams.length < tournament.maxTeams && (
         <div className="mt-4">
-          <RegisterTeamForm tournamentId={tournament.id} sport={tournament.sport} />
+          <RegisterTeamForm organizationId={org.id} tournamentId={tournament.id} sport={tournament.sport} />
         </div>
       )}
 

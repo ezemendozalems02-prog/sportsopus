@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { getOrganization, listPlans } from "@/lib/db";
+import { listPlans } from "@/lib/db";
 import { formatUsd } from "@/lib/format";
 
 export default function PlanesPage() {
   const plans = listPlans();
-  const org = getOrganization();
 
   return (
     <div className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-16 dark:bg-black">
@@ -65,8 +64,9 @@ export default function PlanesPage() {
         </div>
 
         <p className="mt-8 text-xs text-zinc-400">
-          Demo con datos de ejemplo de {org.name}. El cobro real se procesa con Mercado Pago Suscripciones — todavía no
-          conectado, así que el pago dentro de esta demo queda simulado.
+          Cada cuenta que se registra arranca aislada, con su propio panel y su propio link de reserva. El cobro real
+          se procesa con Mercado Pago Suscripciones — todavía no conectado, así que el pago dentro de esta demo queda
+          simulado.
         </p>
       </div>
     </div>

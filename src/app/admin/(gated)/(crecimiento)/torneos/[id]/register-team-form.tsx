@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { registerTeamAction } from "@/lib/actions";
 
-export function RegisterTeamForm({ tournamentId }: { tournamentId: string }) {
+export function RegisterTeamForm({ organizationId, tournamentId }: { organizationId: string; tournamentId: string }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [players, setPlayers] = useState("");
@@ -17,7 +17,7 @@ export function RegisterTeamForm({ tournamentId }: { tournamentId: string }) {
     setError(null);
     startTransition(async () => {
       try {
-        await registerTeamAction({ tournamentId, name, playerNames });
+        await registerTeamAction({ organizationId, tournamentId, name, playerNames });
         setName("");
         setPlayers("");
         router.refresh();

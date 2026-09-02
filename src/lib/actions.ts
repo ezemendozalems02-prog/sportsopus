@@ -1,23 +1,27 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import {
   activateSubscription,
   addEmployee,
   addExpense,
   adjustStock,
+  adminChangePlan,
+  adminSetSubscriptionStatus,
   cancelSubscription,
   changePlan,
   closeCashSession,
   collectBalance,
+  createCourt,
+  createOrganization,
   createPendingBooking,
   createPromotion,
   createRecurringBooking,
   createSale,
   createTournament,
+  findOrCreateGuestCustomer,
   generateBracket,
-  getCurrentCustomer,
-  getCurrentEmployee,
   joinWaitlist,
   openCashSession,
   payDeposit,
@@ -27,39 +31,117 @@ import {
   setEmployeeActive,
   setPromotionActive,
   simulateTrialExpired,
-  startTrial,
   updateBookingStatus,
   updateEmployeeRole,
+  verifyEmployeeCredentials,
+  verifyPlatformAdminCredentials,
 } from "./db";
+import {
+  clearEmployeeSession,
+  clearSuperadminSession,
+  getCustomerSession,
+  newSessionToken,
+  requireEmployeeSession,
+  requireSuperadminSession,
+  setCustomerSession,
+  setEmployeeSession,
+  setSuperadminSession,
+} from "./session";
 import type {
   BookingPayment,
   BookingStatus,
+  CourtSurface,
   EmployeeRole,
   ExpenseCategory,
   PaymentMethod,
   PlanId,
   Sport,
+  SubscriptionStatus,
 } from "./types";
+
+type GuestContact = { name: string; email: string; phone: string };
+
+async function identifyGuest(organizationId: string, contact: GuestContact) {
+  const customer = findOrCreateGuestCustomer(organizationId, contact);
+  const token = newSessionToken({ kind: "customer", customerId: customer.id, organizationId });
+  await setCustomerSession(organizationId, token);
+  return customer;
+}
+
+function revalidateEverywhere() {
+  revalidatePath("/", "layout");
+}
+
+// ---------------------------------------------------------------------------
+// Auth — login/logout de dueños, registro de una cuenta nueva, superadmin
+// ---------------------------------------------------------------------------
+
+export async function loginAction(email: string, password: string) {
+  const employee = verifyEmployeeCredentials(email, password);
+  if (!employee) throw new Error("Email o contraseña incorrectos");
+  const token = newSessionToken({ kind: "employee", employeeId: employee.id, organizationId: employee.organizationId });
+  await setEmployeeSession(token);
+  redirect("/admin");
+}
+
+export async function logoutAction() {
+  await clearEmployeeSession();
+  redirect("/");
+}
+
+export async function signupAction(input: {
+  orgName: string;
+  ownerName: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  planId: PlanId;
+}) {
+  const { organization, owner } = createOrganization({
+    name: input.orgName,
+    ownerName: input.ownerName,
+    ownerEmail: input.ownerEmail,
+    ownerPassword: input.ownerPassword,
+    planId: input.planId,
+  });
+  const token = newSessionToken({ kind: "employee", employeeId: owner.id, organizationId: organization.id });
+  await setEmployeeSession(token);
+  redirect("/admin");
+}
+
+export async function superadminLoginAction(email: string, password: string) {
+  const admin = verifyPlatformAdminCredentials(email, password);
+  if (!admin) throw new Error("Email o contraseña incorrectos");
+  const token = newSessionToken({ kind: "superadmin", adminId: admin.id });
+  await setSuperadminSession(token);
+  redirect("/superadmin");
+}
+
+export async function superadminLogoutAction() {
+  await clearSuperadminSession();
+  redirect("/");
+}
+
+// ---------------------------------------------------------------------------
+// Reservas (cliente público, identificado como invitado por email)
+// ---------------------------------------------------------------------------
 
 // Books a slot and immediately marks the deposit as paid, simulating an
 // approved Mercado Pago checkout. Swap the `payDeposit` call for a real
 // Mercado Pago preference + webhook once MERCADOPAGO_ACCESS_TOKEN is set.
 // `weeks` > 1 books the same day/time on the following weeks too ("reserva recurrente").
 export async function reserveSlotAction(input: {
+  organizationId: string;
   courtId: string;
   date: string;
   startTime: string;
   weeks?: number;
+  contact: GuestContact;
 }) {
-  const customer = getCurrentCustomer();
-
-  revalidatePath("/reservar");
-  revalidatePath("/mis-reservas");
-  revalidatePath("/admin");
-  revalidatePath("/admin/agenda");
+  const customer = await identifyGuest(input.organizationId, input.contact);
+  revalidateEverywhere();
 
   if (input.weeks && input.weeks > 1) {
-    const { created, skipped } = createRecurringBooking({
+    const { created, skipped } = createRecurringBooking(input.organizationId, {
       courtId: input.courtId,
       customerId: customer.id,
       startDate: input.date,
@@ -70,13 +152,19 @@ export async function reserveSlotAction(input: {
     return { bookingId: created[0].id, createdCount: created.length, skippedDates: skipped };
   }
 
-  const booking = createPendingBooking({ ...input, customerId: customer.id });
-  payDeposit(booking.id, "mercado_pago");
+  const booking = createPendingBooking(input.organizationId, {
+    courtId: input.courtId,
+    customerId: customer.id,
+    date: input.date,
+    startTime: input.startTime,
+  });
+  payDeposit(input.organizationId, booking.id, "mercado_pago");
   return { bookingId: booking.id, createdCount: 1, skippedDates: [] };
 }
 
 export async function collectBalanceAction(bookingId: string, method: BookingPayment["method"]) {
-  collectBalance(bookingId, method);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  collectBalance(organizationId, employeeId, bookingId, method);
   revalidatePath("/admin/agenda");
   revalidatePath("/admin");
   revalidatePath("/admin/caja");
@@ -84,7 +172,8 @@ export async function collectBalanceAction(bookingId: string, method: BookingPay
 }
 
 export async function setBookingStatusAction(bookingId: string, status: BookingStatus) {
-  updateBookingStatus(bookingId, status);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  updateBookingStatus(organizationId, employeeId, bookingId, status);
   revalidatePath("/admin/agenda");
   revalidatePath("/admin");
   revalidatePath("/admin/auditoria");
@@ -95,14 +184,15 @@ export async function setBookingStatusAction(bookingId: string, status: BookingS
 // ---------------------------------------------------------------------------
 
 export async function openCashSessionAction(openingAmount: number) {
-  const employee = getCurrentEmployee();
-  openCashSession(employee.id, openingAmount);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  openCashSession(organizationId, employeeId, openingAmount);
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
 
 export async function closeCashSessionAction(sessionId: string, countedAmount: number) {
-  closeCashSession(sessionId, countedAmount);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  closeCashSession(organizationId, employeeId, sessionId, countedAmount);
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
@@ -111,8 +201,8 @@ export async function createSaleAction(input: {
   items: { productId: string; quantity: number }[];
   method: PaymentMethod;
 }) {
-  const employee = getCurrentEmployee();
-  const sale = createSale({ employeeId: employee.id, items: input.items, method: input.method });
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  const sale = createSale(organizationId, { employeeId, items: input.items, method: input.method });
 
   revalidatePath("/admin/caja");
   revalidatePath("/admin/inventario");
@@ -123,9 +213,26 @@ export async function createSaleAction(input: {
 }
 
 export async function adjustStockAction(productId: string, delta: number, reason: string) {
-  adjustStock(productId, delta, reason);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  adjustStock(organizationId, employeeId, productId, delta, reason);
   revalidatePath("/admin/inventario");
   revalidatePath("/admin/auditoria");
+}
+
+export async function createCourtAction(input: {
+  name: string;
+  sport: Sport;
+  surface: CourtSurface;
+  indoor: boolean;
+  lighting: boolean;
+  slotMinutes: number;
+  openTime: string;
+  closeTime: string;
+  basePrice: number;
+}) {
+  const { organizationId } = await requireEmployeeSession();
+  createCourt(organizationId, input);
+  revalidatePath("/admin/canchas");
 }
 
 export async function addExpenseAction(input: {
@@ -134,28 +241,31 @@ export async function addExpenseAction(input: {
   amount: number;
   date: string;
 }) {
-  const employee = getCurrentEmployee();
-  addExpense({ ...input, employeeId: employee.id });
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  addExpense(organizationId, { ...input, employeeId });
 
   revalidatePath("/admin/gastos");
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
 
-export async function addEmployeeAction(input: { name: string; email: string; role: EmployeeRole }) {
-  addEmployee(input);
+export async function addEmployeeAction(input: { name: string; email: string; role: EmployeeRole; password: string }) {
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  addEmployee(organizationId, employeeId, input);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
 
 export async function updateEmployeeRoleAction(employeeId: string, role: EmployeeRole) {
-  updateEmployeeRole(employeeId, role);
+  const { organizationId, employeeId: actorId } = await requireEmployeeSession();
+  updateEmployeeRole(organizationId, actorId, employeeId, role);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
 
 export async function setEmployeeActiveAction(employeeId: string, active: boolean) {
-  setEmployeeActive(employeeId, active);
+  const { organizationId, employeeId: actorId } = await requireEmployeeSession();
+  setEmployeeActive(organizationId, actorId, employeeId, active);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
@@ -164,18 +274,17 @@ export async function setEmployeeActiveAction(employeeId: string, active: boolea
 // Fase 3 — Lista de espera, fidelización, promociones, torneos
 // ---------------------------------------------------------------------------
 
-export async function joinWaitlistAction(courtId: string, date: string, startTime: string) {
-  const customer = getCurrentCustomer();
-  joinWaitlist(customer.id, courtId, date, startTime);
-  revalidatePath("/reservar");
-  revalidatePath("/mis-reservas");
+export async function joinWaitlistAction(organizationId: string, courtId: string, date: string, startTime: string, contact: GuestContact) {
+  const customer = await identifyGuest(organizationId, contact);
+  joinWaitlist(organizationId, customer.id, courtId, date, startTime);
+  revalidateEverywhere();
 }
 
-export async function redeemRewardAction(rewardId: string) {
-  const customer = getCurrentCustomer();
-  redeemLoyaltyReward(customer.id, rewardId);
-  revalidatePath("/beneficios");
-  revalidatePath("/admin/auditoria");
+export async function redeemRewardAction(organizationId: string, rewardId: string) {
+  const session = await getCustomerSession(organizationId);
+  if (!session) throw new Error("No pudimos identificarte");
+  redeemLoyaltyReward(organizationId, session.customerId, rewardId);
+  revalidateEverywhere();
 }
 
 export async function createPromotionAction(input: {
@@ -186,13 +295,15 @@ export async function createPromotionAction(input: {
   endTime: string;
   sports?: Sport[];
 }) {
-  createPromotion({ ...input, active: true });
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  createPromotion(organizationId, employeeId, { ...input, active: true });
   revalidatePath("/admin/promociones");
   revalidatePath("/admin/auditoria");
 }
 
 export async function setPromotionActiveAction(promotionId: string, active: boolean) {
-  setPromotionActive(promotionId, active);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  setPromotionActive(organizationId, employeeId, promotionId, active);
   revalidatePath("/admin/promociones");
   revalidatePath("/admin/auditoria");
 }
@@ -206,75 +317,94 @@ export async function createTournamentAction(input: {
   entryFee: number;
   prize: string;
 }) {
-  const tournament = createTournament(input);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  const tournament = createTournament(organizationId, employeeId, input);
   revalidatePath("/admin/torneos");
-  revalidatePath("/torneos");
-  revalidatePath("/admin/auditoria");
+  revalidateEverywhere();
   return tournament.id;
 }
 
+// Usado tanto desde el panel admin (organizationId conocido por sesión) como
+// desde el sitio público del cliente (organizationId conocido por el slug de
+// la URL) — por eso lo recibe como parámetro en vez de resolverlo de la sesión.
 export async function registerTeamAction(input: {
+  organizationId: string;
   tournamentId: string;
   name: string;
   playerNames: string[];
-  asCurrentCustomer?: boolean;
+  contact?: GuestContact;
 }) {
-  const customer = getCurrentCustomer();
-  registerTeam({
+  const customer = input.contact ? await identifyGuest(input.organizationId, input.contact) : undefined;
+  registerTeam(input.organizationId, {
     tournamentId: input.tournamentId,
     name: input.name,
     playerNames: input.playerNames,
-    customerId: input.asCurrentCustomer ? customer.id : undefined,
+    customerId: customer?.id,
   });
   revalidatePath(`/admin/torneos/${input.tournamentId}`);
-  revalidatePath(`/torneos/${input.tournamentId}`);
   revalidatePath("/admin/auditoria");
-}
-
-export async function generateBracketAction(tournamentId: string) {
-  generateBracket(tournamentId);
-  revalidatePath(`/admin/torneos/${tournamentId}`);
-  revalidatePath(`/torneos/${tournamentId}`);
-  revalidatePath("/admin/torneos");
-}
-
-export async function recordMatchResultAction(matchId: string, winnerTeamId: string, scoreLabel: string, tournamentId: string) {
-  recordMatchResult(matchId, winnerTeamId, scoreLabel || undefined);
-  revalidatePath(`/admin/torneos/${tournamentId}`);
-  revalidatePath(`/torneos/${tournamentId}`);
-  revalidatePath("/admin/ranking");
-  revalidatePath("/admin/auditoria");
-}
-
-// ---------------------------------------------------------------------------
-// SaaS — prueba gratis, planes, facturación
-// ---------------------------------------------------------------------------
-
-function revalidateEverywhere() {
-  revalidatePath("/", "layout");
-}
-
-export async function startTrialAction(planId: PlanId, billingEmail: string) {
-  startTrial(planId, billingEmail);
   revalidateEverywhere();
 }
 
+export async function generateBracketAction(tournamentId: string) {
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  generateBracket(organizationId, employeeId, tournamentId);
+  revalidatePath(`/admin/torneos/${tournamentId}`);
+  revalidatePath("/admin/torneos");
+  revalidateEverywhere();
+}
+
+export async function recordMatchResultAction(matchId: string, winnerTeamId: string, scoreLabel: string, tournamentId: string) {
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  recordMatchResult(organizationId, employeeId, matchId, winnerTeamId, scoreLabel || undefined);
+  revalidatePath(`/admin/torneos/${tournamentId}`);
+  revalidatePath("/admin/ranking");
+  revalidatePath("/admin/auditoria");
+  revalidateEverywhere();
+}
+
+// ---------------------------------------------------------------------------
+// SaaS — cambio de plan, facturación de la propia cuenta
+// ---------------------------------------------------------------------------
+
 export async function changePlanAction(planId: PlanId) {
-  changePlan(planId);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  changePlan(organizationId, employeeId, planId);
   revalidateEverywhere();
 }
 
 export async function activateSubscriptionAction(billingEmail: string) {
-  activateSubscription(billingEmail);
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  activateSubscription(organizationId, employeeId, billingEmail);
   revalidateEverywhere();
 }
 
 export async function cancelSubscriptionAction() {
-  cancelSubscription();
+  const { organizationId, employeeId } = await requireEmployeeSession();
+  cancelSubscription(organizationId, employeeId);
   revalidateEverywhere();
 }
 
 export async function simulateTrialExpiredAction() {
-  simulateTrialExpired();
+  const { organizationId } = await requireEmployeeSession();
+  simulateTrialExpired(organizationId);
   revalidateEverywhere();
+}
+
+// ---------------------------------------------------------------------------
+// Superadmin — gestión de todas las organizaciones
+// ---------------------------------------------------------------------------
+
+export async function superadminChangePlanAction(organizationId: string, planId: PlanId) {
+  await requireSuperadminSession();
+  adminChangePlan(organizationId, planId);
+  revalidatePath("/superadmin/organizaciones");
+  revalidatePath(`/superadmin/organizaciones/${organizationId}`);
+}
+
+export async function superadminSetStatusAction(organizationId: string, status: SubscriptionStatus) {
+  await requireSuperadminSession();
+  adminSetSubscriptionStatus(organizationId, status);
+  revalidatePath("/superadmin/organizaciones");
+  revalidatePath(`/superadmin/organizaciones/${organizationId}`);
 }

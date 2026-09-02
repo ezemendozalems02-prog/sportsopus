@@ -10,6 +10,7 @@ import {
   listTeamsForTournament,
   listTournaments,
 } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { EXPENSE_CATEGORY_LABELS, formatCurrency } from "@/lib/format";
 import { addDaysISO, formatDateLong, todayISO } from "@/lib/time";
 import { Card, StatTile } from "@/components/ui";
@@ -24,15 +25,16 @@ export default async function ReportesPage({
 }: {
   searchParams: Promise<{ period?: string }>;
 }) {
+  const { organizationId } = await requireEmployeeSession();
   const { period } = await searchParams;
   const days = period === "30" ? 30 : 7;
   const today = todayISO();
   const fromDate = addDaysISO(today, -(days - 1));
   const inRange = (dateISO: string) => dateISO >= fromDate && dateISO <= today;
 
-  const courts = listCourts().filter((c) => c.active);
-  const allSales = listSales().filter((s) => inRange(s.createdAt.slice(0, 10)));
-  const allExpenses = listExpenses().filter((e) => inRange(e.date));
+  const courts = listCourts(organizationId).filter((c) => c.active);
+  const allSales = listSales(organizationId).filter((s) => inRange(s.createdAt.slice(0, 10)));
+  const allExpenses = listExpenses(organizationId).filter((e) => inRange(e.date));
 
   // Revenue collected per booking payment, occupancy and per-court revenue —
   // all derived by walking each day in the period once.
@@ -45,11 +47,11 @@ export default async function ReportesPage({
   for (let offset = -(days - 1); offset <= 0; offset++) {
     const date = addDaysISO(today, offset);
     for (const court of courts) {
-      const slots = getSlotsForCourt(court.id, date);
+      const slots = getSlotsForCourt(organizationId, court.id, date);
       possibleSum += slots.length;
       occupiedSum += slots.filter((s) => !s.available).length;
     }
-    for (const booking of listBookingsForDate(date)) {
+    for (const booking of listBookingsForDate(organizationId, date)) {
       const paidThisBooking = booking.payments.reduce((sum, p) => (inRange(p.paidAt.slice(0, 10)) ? sum + p.amount : sum), 0);
       if (paidThisBooking === 0) continue;
       canchasRevenue += paidThisBooking;
@@ -60,7 +62,7 @@ export default async function ReportesPage({
   const avgOccupancy = possibleSum ? occupiedSum / possibleSum : 0;
 
   const productosRevenue = allSales.reduce((sum, s) => sum + s.total, 0);
-  const torneosRevenue = listTournaments().reduce((sum, t) => {
+  const torneosRevenue = listTournaments(organizationId).reduce((sum, t) => {
     const teams = listTeamsForTournament(t.id).filter((team) => team.paidEntry && inRange(team.registeredAt.slice(0, 10)));
     return sum + teams.length * t.entryFee;
   }, 0);
@@ -69,12 +71,12 @@ export default async function ReportesPage({
   const resultado = ingresos - gastos;
 
   const topCourts = [...revenueByCourt.entries()]
-    .map(([courtId, revenue]) => ({ court: getCourt(courtId), revenue }))
+    .map(([courtId, revenue]) => ({ court: getCourt(organizationId, courtId), revenue }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
   const topCustomers = [...revenueByCustomer.entries()]
-    .map(([customerId, spent]) => ({ customer: getCustomer(customerId), spent }))
+    .map(([customerId, spent]) => ({ customer: getCustomer(organizationId, customerId), spent }))
     .sort((a, b) => b.spent - a.spent)
     .slice(0, 5);
 

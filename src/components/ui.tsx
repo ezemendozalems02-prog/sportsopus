@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import { BOOKING_STATUS_LABELS } from "@/lib/format";
 import type { BookingStatus } from "@/lib/types";
 
@@ -34,14 +35,19 @@ export function StatTile({
   label,
   value,
   sub,
+  icon: Icon,
 }: {
   label: string;
   value: string;
   sub?: string;
+  icon?: LucideIcon;
 }) {
   return (
     <Card>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
+        {Icon && <Icon className="h-4 w-4 text-emerald-500" />}
+      </div>
       <p className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{value}</p>
       {sub && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{sub}</p>}
     </Card>

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { redeemRewardAction } from "@/lib/actions";
 
-export function RedeemButton({ rewardId, canAfford }: { rewardId: string; canAfford: boolean }) {
+export function RedeemButton({ organizationId, rewardId, canAfford }: { organizationId: string; rewardId: string; canAfford: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export function RedeemButton({ rewardId, canAfford }: { rewardId: string; canAff
           startTransition(async () => {
             setError(null);
             try {
-              await redeemRewardAction(rewardId);
+              await redeemRewardAction(organizationId, rewardId);
               router.refresh();
             } catch (e) {
               setError(e instanceof Error ? e.message : "No se pudo canjear");

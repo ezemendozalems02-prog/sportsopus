@@ -1,20 +1,31 @@
 import { getSlotsForCourt, listCourts } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { todayISO } from "@/lib/time";
 import { Card } from "@/components/ui";
+import { NewCourtForm } from "./new-court-form";
 
-export default function CanchasPage() {
+export default async function CanchasPage() {
+  const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const courts = listCourts();
+  const courts = listCourts(organizationId);
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Canchas</h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{courts.length} canchas configuradas</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Canchas</h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{courts.length} canchas configuradas</p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <NewCourtForm />
+      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {courts.map((court) => {
-          const slotsToday = getSlotsForCourt(court.id, today);
+          const slotsToday = getSlotsForCourt(organizationId, court.id, today);
           const occupied = slotsToday.filter((s) => !s.available).length;
           const occupancy = slotsToday.length ? Math.round((occupied / slotsToday.length) * 100) : 0;
 
@@ -67,6 +78,11 @@ export default function CanchasPage() {
             </Card>
           );
         })}
+        {courts.length === 0 && (
+          <Card>
+            <p className="text-sm text-zinc-400">Todavía no tenés canchas cargadas — agregá la primera arriba.</p>
+          </Card>
+        )}
       </div>
     </div>
   );

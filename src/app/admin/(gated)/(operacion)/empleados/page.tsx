@@ -1,11 +1,13 @@
 import { listEmployees } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { EMPLOYEE_ROLE_LABELS } from "@/lib/format";
 import { Card } from "@/components/ui";
 import { AddEmployeeForm } from "./add-employee-form";
 import { EmployeeRowActions } from "./employee-row-actions";
 
-export default function EmpleadosPage() {
-  const employees = listEmployees();
+export default async function EmpleadosPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const employees = listEmployees(organizationId);
 
   return (
     <div>

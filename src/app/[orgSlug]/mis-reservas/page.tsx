@@ -1,9 +1,12 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   getCourt,
-  getCurrentCustomer,
+  getOrganizationBySlug,
   listBookingsForCustomer,
   listWaitlistForCustomer,
 } from "@/lib/db";
+import { getCustomerSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card, StatusBadge } from "@/components/ui";
@@ -15,10 +18,33 @@ const WAITLIST_STATUS_LABELS: Record<string, string> = {
   reservado: "Reservado",
 };
 
-export default function MisReservasPage() {
-  const customer = getCurrentCustomer();
-  const bookings = listBookingsForCustomer(customer.id);
-  const waitlist = listWaitlistForCustomer(customer.id).filter((w) => w.status !== "reservado");
+export default async function MisReservasPage({ params }: { params: Promise<{ orgSlug: string }> }) {
+  const { orgSlug } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const session = await getCustomerSession(org.id);
+  if (!session) {
+    return (
+      <div>
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Mis turnos</h1>
+        <Card className="mt-6 text-center">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Todavía no hiciste ninguna reserva acá. En cuanto reserves tu primer turno, lo vas a ver en esta pantalla.
+          </p>
+          <Link
+            href={`/${orgSlug}/reservar`}
+            className="mt-4 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Reservar ahora
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  const bookings = listBookingsForCustomer(org.id, session.customerId);
+  const waitlist = listWaitlistForCustomer(org.id, session.customerId).filter((w) => w.status !== "reservado");
 
   return (
     <div>
@@ -28,7 +54,7 @@ export default function MisReservasPage() {
       {waitlist.length > 0 && (
         <div className="mt-4 flex flex-col gap-2">
           {waitlist.map((entry) => {
-            const court = getCourt(entry.courtId);
+            const court = getCourt(org.id, entry.courtId);
             return (
               <div
                 key={entry.id}
@@ -50,7 +76,7 @@ export default function MisReservasPage() {
 
       <div className="mt-6 flex flex-col gap-3">
         {bookings.map((booking) => {
-          const court = getCourt(booking.courtId);
+          const court = getCourt(org.id, booking.courtId);
           return (
             <Card key={booking.id}>
               <div className="flex items-start justify-between gap-3">
@@ -89,6 +115,11 @@ export default function MisReservasPage() {
             </Card>
           );
         })}
+        {bookings.length === 0 && (
+          <Card>
+            <p className="text-sm text-zinc-400">Todavía no tenés reservas.</p>
+          </Card>
+        )}
       </div>
     </div>
   );

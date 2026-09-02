@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { listTeamsForTournament, listTournaments } from "@/lib/db";
+import { notFound } from "next/navigation";
+import { getOrganizationBySlug, listTeamsForTournament, listTournaments } from "@/lib/db";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card } from "@/components/ui";
@@ -10,8 +11,12 @@ const STATUS_LABELS: Record<string, string> = {
   finalizado: "Finalizado",
 };
 
-export default function TorneosPage() {
-  const tournaments = listTournaments();
+export default async function TorneosPage({ params }: { params: Promise<{ orgSlug: string }> }) {
+  const { orgSlug } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const tournaments = listTournaments(org.id);
 
   return (
     <div>
@@ -21,7 +26,7 @@ export default function TorneosPage() {
         {tournaments.map((tournament) => {
           const teams = listTeamsForTournament(tournament.id);
           return (
-            <Link key={tournament.id} href={`/torneos/${tournament.id}`}>
+            <Link key={tournament.id} href={`/${orgSlug}/torneos/${tournament.id}`}>
               <Card className="transition hover:border-emerald-400">
                 <div className="flex items-start justify-between">
                   <div>

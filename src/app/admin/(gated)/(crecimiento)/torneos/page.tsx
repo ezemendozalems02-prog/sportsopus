@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listTeamsForTournament, listTournaments } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card } from "@/components/ui";
@@ -11,8 +12,9 @@ const STATUS_LABELS: Record<string, string> = {
   finalizado: "Finalizado",
 };
 
-export default function TorneosAdminPage() {
-  const tournaments = listTournaments();
+export default async function TorneosAdminPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const tournaments = listTournaments(organizationId);
 
   return (
     <div>

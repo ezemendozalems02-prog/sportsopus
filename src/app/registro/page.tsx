@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getOrganization, listPlans } from "@/lib/db";
+import { listPlans } from "@/lib/db";
 import type { PlanId } from "@/lib/types";
 import { SignupForm } from "./signup-form";
 
@@ -10,7 +10,6 @@ export default async function RegistroPage({
 }) {
   const { plan } = await searchParams;
   const plans = listPlans();
-  const org = getOrganization();
   const validPlan = plans.some((p) => p.id === plan) ? (plan as PlanId) : "pro";
 
   return (
@@ -21,7 +20,7 @@ export default async function RegistroPage({
         </Link>
         <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Empezá tu prueba gratis</h1>
       </div>
-      <SignupForm plans={plans} initialPlan={validPlan} orgName={org.name} />
+      <SignupForm plans={plans} initialPlan={validPlan} />
     </div>
   );
 }

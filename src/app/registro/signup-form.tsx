@@ -1,41 +1,58 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { startTrialAction } from "@/lib/actions";
+import Link from "next/link";
+import { signupAction } from "@/lib/actions";
 import { formatUsd } from "@/lib/format";
 import type { Plan, PlanId } from "@/lib/types";
 
-export function SignupForm({ plans, initialPlan, orgName }: { plans: Plan[]; initialPlan: PlanId; orgName: string }) {
-  const router = useRouter();
+export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan: PlanId }) {
   const [planId, setPlanId] = useState<PlanId>(initialPlan);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerPassword, setOwnerPassword] = useState("");
   const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   const plan = plans.find((p) => p.id === planId)!;
+  const canSubmit = orgName && ownerName && ownerEmail && ownerPassword.length >= 6;
 
   function handleSubmit() {
-    if (!name || !email) return;
+    if (!canSubmit) return;
+    setError(null);
     startTransition(async () => {
-      await startTrialAction(planId, email);
-      router.push("/admin");
+      try {
+        await signupAction({ orgName, ownerName, ownerEmail, ownerPassword, planId });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo crear la cuenta");
+      }
     });
   }
 
   return (
     <div className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
       <p className="text-xs text-zinc-400">
-        Esta demo tiene un solo complejo ({orgName}) — al confirmar, activamos la prueba gratis sobre esa cuenta de
-        ejemplo.
+        Creamos una cuenta propia y aislada para tu complejo, con tu panel y tu link de reserva.
       </p>
 
       <label className="mt-4 block text-sm text-zinc-600 dark:text-zinc-400">
+        Nombre de tu complejo
+        <input
+          type="text"
+          value={orgName}
+          onChange={(e) => setOrgName(e.target.value)}
+          placeholder="Club Deportivo Belgrano"
+          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
+
+      <label className="mt-3 block text-sm text-zinc-600 dark:text-zinc-400">
         Tu nombre
         <input
           type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={ownerName}
+          onChange={(e) => setOwnerName(e.target.value)}
           placeholder="Martín Suárez"
           className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
         />
@@ -45,9 +62,20 @@ export function SignupForm({ plans, initialPlan, orgName }: { plans: Plan[]; ini
         Email
         <input
           type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={ownerEmail}
+          onChange={(e) => setOwnerEmail(e.target.value)}
           placeholder="martin@tucomplejo.com"
+          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
+
+      <label className="mt-3 block text-sm text-zinc-600 dark:text-zinc-400">
+        Contraseña
+        <input
+          type="password"
+          value={ownerPassword}
+          onChange={(e) => setOwnerPassword(e.target.value)}
+          placeholder="Mínimo 6 caracteres"
           className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
         />
       </label>
@@ -69,13 +97,22 @@ export function SignupForm({ plans, initialPlan, orgName }: { plans: Plan[]; ini
 
       <p className="mt-3 text-xs text-zinc-400">{plan.tagline}. 7 días gratis, sin tarjeta.</p>
 
+      {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+
       <button
         onClick={handleSubmit}
-        disabled={pending || !name || !email}
+        disabled={pending || !canSubmit}
         className="mt-4 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
       >
         {pending ? "Creando cuenta..." : "Empezar prueba gratis de 7 días"}
       </button>
+
+      <p className="mt-4 text-center text-xs text-zinc-400">
+        ¿Ya tenés cuenta?{" "}
+        <Link href="/login" className="font-medium text-emerald-600 dark:text-emerald-400">
+          Iniciar sesión
+        </Link>
+      </p>
     </div>
   );
 }

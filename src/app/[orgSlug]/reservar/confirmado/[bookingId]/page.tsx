@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getBooking, getCourt } from "@/lib/db";
+import { getBooking, getCourt, getOrganizationBySlug } from "@/lib/db";
 import { formatCurrency } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card, StatusBadge } from "@/components/ui";
@@ -8,13 +8,16 @@ import { Card, StatusBadge } from "@/components/ui";
 export default async function ConfirmadoPage({
   params,
 }: {
-  params: Promise<{ bookingId: string }>;
+  params: Promise<{ orgSlug: string; bookingId: string }>;
 }) {
-  const { bookingId } = await params;
-  const booking = getBooking(bookingId);
+  const { orgSlug, bookingId } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const booking = getBooking(org.id, bookingId);
   if (!booking) notFound();
 
-  const court = getCourt(booking.courtId);
+  const court = getCourt(org.id, booking.courtId);
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -48,7 +51,7 @@ export default async function ConfirmadoPage({
       </Card>
 
       <Link
-        href="/mis-reservas"
+        href={`/${orgSlug}/mis-reservas`}
         className="mt-6 w-full rounded-xl bg-zinc-900 py-3 font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
       >
         Ver mis turnos

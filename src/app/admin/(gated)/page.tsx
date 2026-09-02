@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { AlertTriangle, ArrowUpRight, TrendingUp } from "lucide-react";
 import {
+  computeDailyRevenue,
   getCustomer,
   getOpenCashSession,
   getSlotsForCourt,
@@ -10,21 +12,25 @@ import {
   listTeamsForTournament,
   listTournaments,
 } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong, todayISO } from "@/lib/time";
 import { Card, OccupancyBar, StatTile, StatusBadge } from "@/components/ui";
+import { RevenueTrendChart } from "@/components/charts";
 
 function paymentsTotal(bookings: ReturnType<typeof listBookingsForDate>) {
   return bookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
 }
 
-export default function AdminDashboardPage() {
+export default async function AdminDashboardPage() {
+  const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const courts = listCourts().filter((c) => c.active);
-  const todayBookings = listBookingsForDate(today);
-  const todaySales = listSales().filter((s) => s.createdAt.startsWith(today));
-  const lowStock = listLowStockProducts();
-  const cashSession = getOpenCashSession();
+  const courts = listCourts(organizationId).filter((c) => c.active);
+  const todayBookings = listBookingsForDate(organizationId, today);
+  const todaySales = listSales(organizationId).filter((s) => s.createdAt.startsWith(today));
+  const lowStock = listLowStockProducts(organizationId);
+  const cashSession = getOpenCashSession(organizationId);
+  const trend = computeDailyRevenue(organizationId, 14);
 
   // Revenue actually collected today = payments recorded on today's bookings
   // (a "pendiente_pago" booking has none yet, "sena_pagada" only the deposit)
@@ -39,7 +45,7 @@ export default function AdminDashboardPage() {
   const pendingCount = todayBookings.filter((b) => b.status === "pendiente_pago").length;
 
   const courtOccupancy = courts.map((court) => {
-    const slots = getSlotsForCourt(court.id, today);
+    const slots = getSlotsForCourt(organizationId, court.id, today);
     const occupied = slots.filter((s) => !s.available).length;
     return { court, pct: slots.length ? occupied / slots.length : 0 };
   });
@@ -54,7 +60,7 @@ export default function AdminDashboardPage() {
     }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  const activeTournaments = listTournaments().filter((t) => t.status !== "finalizado");
+  const activeTournaments = listTournaments(organizationId).filter((t) => t.status !== "finalizado");
 
   return (
     <div>
@@ -62,10 +68,33 @@ export default function AdminDashboardPage() {
       <p className="mt-1 text-sm capitalize text-zinc-500 dark:text-zinc-400">{formatDateLong(today)}</p>
 
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="Facturación de hoy" value={formatCurrency(revenueToday)} />
-        <StatTile label="Reservas de hoy" value={String(todayBookings.length)} />
+        <StatTile label="Facturación de hoy" value={formatCurrency(revenueToday)} icon={TrendingUp} />
+        <StatTile label="Reservas de hoy" value={String(todayBookings.length)} icon={ArrowUpRight} />
         <StatTile label="Confirmadas" value={String(confirmedCount)} sub={`${pendingCount} pendientes de pago`} />
         <StatTile label="Ocupación promedio" value={`${Math.round(overallOccupancy * 100)}%`} />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Facturación — últimos 14 días</h2>
+          {trend.some((d) => d.total > 0) ? (
+            <div className="mt-2">
+              <RevenueTrendChart data={trend} />
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-zinc-400">Todavía no hay facturación para graficar.</p>
+          )}
+        </Card>
+
+        <Card>
+          <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Ocupación por cancha</h2>
+          <div className="mt-4 flex flex-col gap-3">
+            {courtOccupancy.map(({ court, pct }) => (
+              <OccupancyBar key={court.id} label={court.name} percentage={pct} />
+            ))}
+            {courtOccupancy.length === 0 && <p className="text-sm text-zinc-400">Todavía no cargaste canchas.</p>}
+          </div>
+        </Card>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -82,7 +111,7 @@ export default function AdminDashboardPage() {
               .slice(0, 8)
               .map((booking) => {
                 const court = courts.find((c) => c.id === booking.courtId);
-                const customer = getCustomer(booking.customerId);
+                const customer = getCustomer(organizationId, booking.customerId);
                 return (
                   <div key={booking.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                     <span className="w-12 shrink-0 font-medium text-zinc-700 dark:text-zinc-300">{booking.startTime}</span>
@@ -100,17 +129,6 @@ export default function AdminDashboardPage() {
         </Card>
 
         <Card>
-          <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Ocupación por cancha</h2>
-          <div className="mt-4 flex flex-col gap-3">
-            {courtOccupancy.map(({ court, pct }) => (
-              <OccupancyBar key={court.id} label={court.name} percentage={pct} />
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
           <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Ingresos de hoy por cancha</h2>
           <div className="mt-4 flex flex-col gap-2">
             {revenueByCourt.map(({ court, revenue }) => (
@@ -121,20 +139,7 @@ export default function AdminDashboardPage() {
                 <span className="font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(revenue)}</span>
               </div>
             ))}
-          </div>
-        </Card>
-
-        <Card>
-          <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Ingresos de hoy por categoría</h2>
-          <div className="mt-4 flex flex-col gap-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-600 dark:text-zinc-400">Canchas</span>
-              <span className="font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(courtRevenueToday)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-600 dark:text-zinc-400">Bar / Productos</span>
-              <span className="font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(productRevenueToday)}</span>
-            </div>
+            {revenueByCourt.length === 0 && <p className="text-sm text-zinc-400">Todavía no cargaste canchas.</p>}
           </div>
           <p className="mt-4 border-t border-zinc-100 pt-3 text-xs text-zinc-400 dark:border-zinc-800">
             Caja: {cashSession ? "abierta" : "cerrada"} ·{" "}
@@ -176,13 +181,13 @@ export default function AdminDashboardPage() {
       {(pendingCount > 0 || lowStock.length > 0) && (
         <div className="mt-4 flex flex-col gap-1.5">
           {pendingCount > 0 && (
-            <p className="text-sm text-amber-600 dark:text-amber-400">
-              ⚠️ {pendingCount} reserva{pendingCount > 1 ? "s" : ""} pendiente{pendingCount > 1 ? "s" : ""} de pago hoy.
+            <p className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-4 w-4" /> {pendingCount} reserva{pendingCount > 1 ? "s" : ""} pendiente{pendingCount > 1 ? "s" : ""} de pago hoy.
             </p>
           )}
           {lowStock.length > 0 && (
-            <p className="text-sm text-amber-600 dark:text-amber-400">
-              ⚠️ {lowStock.length} producto{lowStock.length > 1 ? "s" : ""} con stock bajo:{" "}
+            <p className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-4 w-4" /> {lowStock.length} producto{lowStock.length > 1 ? "s" : ""} con stock bajo:{" "}
               {lowStock.map((p) => p.name).join(", ")}.{" "}
               <Link href="/admin/inventario" className="underline">
                 Ver inventario

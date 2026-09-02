@@ -1,4 +1,5 @@
 import { listPromotions } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { SPORT_LABELS } from "@/lib/format";
 import { Card } from "@/components/ui";
 import { AddPromotionForm } from "./add-promotion-form";
@@ -12,7 +13,8 @@ export default async function PromocionesPage({
 }: {
   searchParams: Promise<{ dow?: string; band?: string; sport?: string }>;
 }) {
-  const promotions = listPromotions();
+  const { organizationId } = await requireEmployeeSession();
+  const promotions = listPromotions(organizationId);
   const { dow, band, sport } = await searchParams;
   const [prefillStart, prefillEnd] = band?.split("-") ?? [];
 

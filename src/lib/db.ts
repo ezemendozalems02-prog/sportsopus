@@ -8,6 +8,7 @@ import type {
   CashMovement,
   CashRegisterSession,
   Court,
+  CourtSurface,
   Customer,
   Employee,
   EmployeeRole,
@@ -23,12 +24,15 @@ import type {
   Plan,
   PlanFeatureGroup,
   PlanId,
+  PlatformAdmin,
   Product,
   ProductCategory,
   Promotion,
   RankingEntry,
   Sale,
   SaleItem,
+  Sport,
+  SubscriptionStatus,
   Tournament,
   TournamentMatch,
   TournamentTeam,
@@ -47,22 +51,34 @@ import { mulberry32 } from "./seed-rng";
 // swap to `supabase/migrations/0001_init.sql` is a matter of replacing the
 // functions below with real queries — the app code above this module never
 // touches the storage shape directly.
+//
+// Multi-tenant: every tenant-scoped function takes `organizationId` as an
+// explicit parameter (resolved from a session cookie or a URL slug by the
+// caller, see src/lib/session.ts) rather than reading an implicit "current
+// org" — a plain module-level variable would leak across concurrent
+// requests from different tenants. `get*` lookups by entity id also check
+// the record's organizationId, so guessing another tenant's id never works.
 // ---------------------------------------------------------------------------
 
-const ORG_ID = "org_palermo";
+const ORG_PALERMO_ID = "org_palermo";
 
-const organization: Organization = {
-  id: ORG_ID,
-  name: "Sport Club Palermo",
-  slug: "sport-club-palermo",
-  depositPercentage: 0.3,
-  timezone: "America/Argentina/Buenos_Aires",
-  plan: "business",
-  subscriptionStatus: "active",
-  billingEmail: "martin@palermo.club",
-  currentPeriodEnd: addDaysISO(todayISO(), 18),
-  mercadopagoSubscriptionId: "mp_sub_demo_1",
-};
+const organizations: Organization[] = [
+  {
+    id: ORG_PALERMO_ID,
+    name: "Sport Club Palermo",
+    slug: "sport-club-palermo",
+    depositPercentage: 0.3,
+    timezone: "America/Argentina/Buenos_Aires",
+    plan: "business",
+    subscriptionStatus: "active",
+    billingEmail: "martin@palermo.club",
+    currentPeriodEnd: addDaysISO(todayISO(), 18),
+    mercadopagoSubscriptionId: "mp_sub_demo_1",
+  },
+];
+let organizationSeq = 2;
+
+const palermoOrg = organizations[0];
 
 // Precio de referencia en USD (como lo pediste). Mercado Pago Suscripciones
 // cobra en la moneda de la cuenta MP (normalmente ARS), así que al conectarlo
@@ -112,10 +128,27 @@ const PLANS: Plan[] = [
   },
 ];
 
+// Contraseñas mock en texto plano — solo para esta demo sin backend real.
+// Cuando se conecte Supabase Auth, las credenciales pasan a manejarse ahí
+// por completo y este campo desaparece del modelo.
+const DEMO_PASSWORD = "demo1234";
+
 const employees: Employee[] = [
-  { id: "emp_1", organizationId: ORG_ID, name: "Martín Suárez", email: "martin@palermo.club", role: "owner", active: true },
-  { id: "emp_2", organizationId: ORG_ID, name: "Camila Ríos", email: "camila@palermo.club", role: "admin", active: true },
-  { id: "emp_3", organizationId: ORG_ID, name: "Nico Álvarez", email: "nico@palermo.club", role: "cajero", active: true },
+  { id: "emp_1", organizationId: ORG_PALERMO_ID, name: "Martín Suárez", email: "martin@palermo.club", password: DEMO_PASSWORD, role: "owner", active: true },
+  { id: "emp_2", organizationId: ORG_PALERMO_ID, name: "Camila Ríos", email: "camila@palermo.club", password: DEMO_PASSWORD, role: "admin", active: true },
+  { id: "emp_3", organizationId: ORG_PALERMO_ID, name: "Nico Álvarez", email: "nico@palermo.club", password: DEMO_PASSWORD, role: "cajero", active: true },
+];
+let employeeSeq = employees.length + 1;
+
+// Superadmin (dueño de la plataforma SportControl) — no pertenece a ningún
+// tenant. Credenciales vía variables de entorno con un default de
+// desarrollo, nunca un secreto real hardcodeado en el repo.
+const platformAdmins: PlatformAdmin[] = [
+  {
+    id: "padmin_1",
+    email: process.env.SUPERADMIN_EMAIL ?? "admin@sportcontrol.app",
+    password: process.env.SUPERADMIN_PASSWORD ?? "super1234",
+  },
 ];
 
 const weekdayPadelRules = (base: number) => [
@@ -137,48 +170,49 @@ function withRuleIds(courtId: string, rules: ReturnType<typeof weekdayPadelRules
 
 const courts: Court[] = [
   {
-    id: "court_padel_1", organizationId: ORG_ID, name: "Pádel 1", sport: "padel",
+    id: "court_padel_1", organizationId: ORG_PALERMO_ID, name: "Pádel 1", sport: "padel",
     surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
     openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("padel1", weekdayPadelRules(15000)), active: true,
   },
   {
-    id: "court_padel_2", organizationId: ORG_ID, name: "Pádel 2", sport: "padel",
+    id: "court_padel_2", organizationId: ORG_PALERMO_ID, name: "Pádel 2", sport: "padel",
     surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
     openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("padel2", weekdayPadelRules(15000)), active: true,
   },
   {
-    id: "court_padel_3", organizationId: ORG_ID, name: "Pádel 3", sport: "padel",
+    id: "court_padel_3", organizationId: ORG_PALERMO_ID, name: "Pádel 3", sport: "padel",
     surface: "sintetico", indoor: false, lighting: true, slotMinutes: 90,
     openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("padel3", weekdayPadelRules(16000)), active: true,
   },
   {
-    id: "court_padel_4", organizationId: ORG_ID, name: "Pádel 4", sport: "padel",
+    id: "court_padel_4", organizationId: ORG_PALERMO_ID, name: "Pádel 4", sport: "padel",
     surface: "sintetico", indoor: false, lighting: false, slotMinutes: 90,
     openTime: "08:00", closeTime: "22:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("padel4", weekdayPadelRules(13000)), active: true,
   },
   {
-    id: "court_futbol5_1", organizationId: ORG_ID, name: "Fútbol 5 #1", sport: "futbol5",
+    id: "court_futbol5_1", organizationId: ORG_PALERMO_ID, name: "Fútbol 5 #1", sport: "futbol5",
     surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
     openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("f5a", weekdayFutbolRules(18000)), active: true,
   },
   {
-    id: "court_futbol5_2", organizationId: ORG_ID, name: "Fútbol 5 #2", sport: "futbol5",
+    id: "court_futbol5_2", organizationId: ORG_PALERMO_ID, name: "Fútbol 5 #2", sport: "futbol5",
     surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
     openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("f5b", weekdayFutbolRules(18000)), active: true,
   },
   {
-    id: "court_futbol8_1", organizationId: ORG_ID, name: "Fútbol 8", sport: "futbol8",
+    id: "court_futbol8_1", organizationId: ORG_PALERMO_ID, name: "Fútbol 8", sport: "futbol8",
     surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
     openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
     priceRules: withRuleIds("f8", weekdayFutbolRules(26000)), active: true,
   },
 ];
+let courtSeq = 1;
 
 const customerNames = [
   "Juan Pérez", "Martín Gómez", "Lucas Díaz", "Sofía Fernández", "Agustina López",
@@ -187,13 +221,14 @@ const customerNames = [
 
 const customers: Customer[] = customerNames.map((name, i) => ({
   id: `cust_${i + 1}`,
-  organizationId: ORG_ID,
+  organizationId: ORG_PALERMO_ID,
   name,
   email: `${name.toLowerCase().replace(/[^a-z]+/g, ".")}@mail.com`,
   phone: `+54 9 11 4${String(1000 + i * 37).padStart(4, "0")}-${String(2000 + i * 53).padStart(4, "0")}`,
   favoriteSport: i % 3 === 0 ? "futbol5" : "padel",
   loyaltyPoints: Math.round((i * 733) % 2200),
 }));
+let customerSeq = customers.length + 1;
 
 // Target occupancy per court, matching the numbers used to design the dashboard.
 const occupancyTarget: Record<string, number> = {
@@ -287,13 +322,13 @@ function seedBookings(): Booking[] {
         const endMinutes = timeToMinutes(startTime) + court.slotMinutes;
         const status = statusForOffset(offset, rand);
         const totalPrice = resolveSlotPrice(court, dateISO, startTime);
-        const { depositAmount, balanceAmount } = computeDeposit(totalPrice, organization);
+        const { depositAmount, balanceAmount } = computeDeposit(totalPrice, palermoOrg);
         const customer = customers[Math.floor(rand() * customers.length)];
 
         const id = `bk_${court.id}_${dateISO}_${startTime.replace(":", "")}`;
         const base: Omit<Booking, "payments"> = {
           id,
-          organizationId: ORG_ID,
+          organizationId: ORG_PALERMO_ID,
           courtId: court.id,
           customerId: customer.id,
           date: dateISO,
@@ -320,39 +355,39 @@ let bookingSeq = bookings.length + 1;
 // ---------------------------------------------------------------------------
 
 const productCategories: ProductCategory[] = [
-  { id: "cat_bebidas", organizationId: ORG_ID, name: "Bebidas" },
-  { id: "cat_snacks", organizationId: ORG_ID, name: "Snacks" },
-  { id: "cat_comidas", organizationId: ORG_ID, name: "Comidas" },
-  { id: "cat_accesorios", organizationId: ORG_ID, name: "Accesorios" },
+  { id: "cat_bebidas", organizationId: ORG_PALERMO_ID, name: "Bebidas" },
+  { id: "cat_snacks", organizationId: ORG_PALERMO_ID, name: "Snacks" },
+  { id: "cat_comidas", organizationId: ORG_PALERMO_ID, name: "Comidas" },
+  { id: "cat_accesorios", organizationId: ORG_PALERMO_ID, name: "Accesorios" },
 ];
 
 const products: Product[] = [
-  { id: "prod_agua", organizationId: ORG_ID, categoryId: "cat_bebidas", name: "Agua", sku: "BEB-001", cost: 1000, price: 2000, stock: 38, minStock: 15, active: true },
-  { id: "prod_gatorade", organizationId: ORG_ID, categoryId: "cat_bebidas", name: "Gatorade", sku: "BEB-002", cost: 1800, price: 3500, stock: 8, minStock: 10, active: true },
-  { id: "prod_cocacola", organizationId: ORG_ID, categoryId: "cat_bebidas", name: "Coca-Cola", sku: "BEB-003", cost: 1500, price: 3000, stock: 24, minStock: 12, active: true },
-  { id: "prod_cerveza", organizationId: ORG_ID, categoryId: "cat_bebidas", name: "Cerveza", sku: "BEB-004", cost: 2200, price: 4000, stock: 30, minStock: 12, active: true },
-  { id: "prod_cafe", organizationId: ORG_ID, categoryId: "cat_bebidas", name: "Café", sku: "BEB-005", cost: 1000, price: 2500, stock: 20, minStock: 10, active: true },
-  { id: "prod_papas", organizationId: ORG_ID, categoryId: "cat_snacks", name: "Papas fritas", sku: "SNK-001", cost: 1400, price: 3000, stock: 6, minStock: 10, active: true },
-  { id: "prod_alfajor", organizationId: ORG_ID, categoryId: "cat_snacks", name: "Alfajor", sku: "SNK-002", cost: 900, price: 1800, stock: 40, minStock: 15, active: true },
-  { id: "prod_barrita", organizationId: ORG_ID, categoryId: "cat_snacks", name: "Barrita de cereal", sku: "SNK-003", cost: 1100, price: 2200, stock: 9, minStock: 10, active: true },
-  { id: "prod_hamburguesa", organizationId: ORG_ID, categoryId: "cat_comidas", name: "Hamburguesa", sku: "CMD-001", cost: 3500, price: 7000, stock: 18, minStock: 8, active: true },
-  { id: "prod_pancho", organizationId: ORG_ID, categoryId: "cat_comidas", name: "Pancho", sku: "CMD-002", cost: 2000, price: 4500, stock: 22, minStock: 8, active: true },
-  { id: "prod_pelotas", organizationId: ORG_ID, categoryId: "cat_accesorios", name: "Pelotas de pádel (tubo x3)", sku: "ACC-001", cost: 7000, price: 12000, stock: 14, minStock: 6, active: true },
-  { id: "prod_grip", organizationId: ORG_ID, categoryId: "cat_accesorios", name: "Grip", sku: "ACC-002", cost: 1200, price: 2500, stock: 3, minStock: 8, active: true },
-  { id: "prod_remera", organizationId: ORG_ID, categoryId: "cat_accesorios", name: "Remera del club", sku: "ACC-003", cost: 9000, price: 18000, stock: 11, minStock: 5, active: true },
-  { id: "prod_paleta", organizationId: ORG_ID, categoryId: "cat_accesorios", name: "Paleta de pádel", sku: "ACC-004", cost: 55000, price: 85000, stock: 4, minStock: 3, active: true },
+  { id: "prod_agua", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Agua", sku: "BEB-001", cost: 1000, price: 2000, stock: 38, minStock: 15, active: true },
+  { id: "prod_gatorade", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Gatorade", sku: "BEB-002", cost: 1800, price: 3500, stock: 8, minStock: 10, active: true },
+  { id: "prod_cocacola", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Coca-Cola", sku: "BEB-003", cost: 1500, price: 3000, stock: 24, minStock: 12, active: true },
+  { id: "prod_cerveza", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Cerveza", sku: "BEB-004", cost: 2200, price: 4000, stock: 30, minStock: 12, active: true },
+  { id: "prod_cafe", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Café", sku: "BEB-005", cost: 1000, price: 2500, stock: 20, minStock: 10, active: true },
+  { id: "prod_papas", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Papas fritas", sku: "SNK-001", cost: 1400, price: 3000, stock: 6, minStock: 10, active: true },
+  { id: "prod_alfajor", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Alfajor", sku: "SNK-002", cost: 900, price: 1800, stock: 40, minStock: 15, active: true },
+  { id: "prod_barrita", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Barrita de cereal", sku: "SNK-003", cost: 1100, price: 2200, stock: 9, minStock: 10, active: true },
+  { id: "prod_hamburguesa", organizationId: ORG_PALERMO_ID, categoryId: "cat_comidas", name: "Hamburguesa", sku: "CMD-001", cost: 3500, price: 7000, stock: 18, minStock: 8, active: true },
+  { id: "prod_pancho", organizationId: ORG_PALERMO_ID, categoryId: "cat_comidas", name: "Pancho", sku: "CMD-002", cost: 2000, price: 4500, stock: 22, minStock: 8, active: true },
+  { id: "prod_pelotas", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Pelotas de pádel (tubo x3)", sku: "ACC-001", cost: 7000, price: 12000, stock: 14, minStock: 6, active: true },
+  { id: "prod_grip", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Grip", sku: "ACC-002", cost: 1200, price: 2500, stock: 3, minStock: 8, active: true },
+  { id: "prod_remera", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Remera del club", sku: "ACC-003", cost: 9000, price: 18000, stock: 11, minStock: 5, active: true },
+  { id: "prod_paleta", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Paleta de pádel", sku: "ACC-004", cost: 55000, price: 85000, stock: 4, minStock: 3, active: true },
 ];
 
 const auditLog: AuditLogEntry[] = [];
 let auditSeq = 1;
 
-function logAudit(employeeId: string, action: string, detail: string, when: string = new Date().toISOString()) {
-  const employee = employees.find((e) => e.id === employeeId);
+function logAudit(organizationId: string, employeeId: string | null, action: string, detail: string, when: string = new Date().toISOString()) {
+  const employee = employeeId ? employees.find((e) => e.id === employeeId) : undefined;
   auditLog.unshift({
     id: `audit_${auditSeq++}`,
-    organizationId: ORG_ID,
-    employeeId,
-    employeeName: employee?.name ?? "Desconocido",
+    organizationId,
+    employeeId: employeeId ?? "system",
+    employeeName: employee?.name ?? "Sistema",
     action,
     detail,
     createdAt: when,
@@ -395,7 +430,7 @@ function seedExpenses(): Expense[] {
 function makeExpense(seq: number, category: ExpenseCategory, description: string, amount: number, dateISO: string): Expense {
   return {
     id: `exp_${seq}`,
-    organizationId: ORG_ID,
+    organizationId: ORG_PALERMO_ID,
     employeeId: "emp_1",
     category,
     description,
@@ -446,7 +481,7 @@ function seedCashHistory() {
 
       sales.push({
         id: `sale_${saleSeq++}`,
-        organizationId: ORG_ID,
+        organizationId: ORG_PALERMO_ID,
         cashSessionId: sessionId,
         employeeId,
         items,
@@ -456,7 +491,7 @@ function seedCashHistory() {
       });
       cashMovements.push({
         id: `cmov_${cashMovementSeq++}`,
-        organizationId: ORG_ID,
+        organizationId: ORG_PALERMO_ID,
         cashSessionId: sessionId,
         type: "venta",
         amount: total,
@@ -471,7 +506,7 @@ function seedCashHistory() {
     const closingCountedAmount = Math.max(0, Math.round(cashTotal + (rand() - 0.5) * 2000));
     cashSessions.push({
       id: sessionId,
-      organizationId: ORG_ID,
+      organizationId: ORG_PALERMO_ID,
       employeeId,
       status: "cerrada",
       openingAmount,
@@ -479,7 +514,7 @@ function seedCashHistory() {
       closingCountedAmount,
       closedAt: `${dateISO}T22:00:00`,
     });
-    logAudit(employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(closingCountedAmount)} contados`, `${dateISO}T22:01:00`);
+    logAudit(ORG_PALERMO_ID, employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(closingCountedAmount)} contados`, `${dateISO}T22:01:00`);
   }
 }
 
@@ -497,7 +532,7 @@ seedCashHistory();
 const promotions: Promotion[] = [
   {
     id: "promo_happy_hour",
-    organizationId: ORG_ID,
+    organizationId: ORG_PALERMO_ID,
     label: "Happy Hour Pádel",
     discountPercentage: 0.2,
     daysOfWeek: [1, 2, 3, 4],
@@ -530,10 +565,10 @@ let waitlistSeq = 1;
 const notifications: NotificationEntry[] = [];
 let notificationSeq = 1;
 
-function notify(customerId: string, kind: NotificationKind, message: string, channel: NotificationChannel = "whatsapp") {
+function notify(organizationId: string, customerId: string, kind: NotificationKind, message: string, channel: NotificationChannel = "whatsapp") {
   notifications.unshift({
     id: `notif_${notificationSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     customerId,
     channel,
     kind,
@@ -616,7 +651,7 @@ function seedTournaments() {
   // Torneo 1: en curso, cuadro generado con resultados parciales cargados.
   const t1: Tournament = {
     id: `tourn_${tournamentSeq++}`,
-    organizationId: ORG_ID,
+    organizationId: ORG_PALERMO_ID,
     name: "Torneo Apertura Pádel",
     sport: "padel",
     category: "8va",
@@ -672,7 +707,7 @@ function seedTournaments() {
   // Torneo 2: todavía en inscripción, sin cuadro generado.
   const t2: Tournament = {
     id: `tourn_${tournamentSeq++}`,
-    organizationId: ORG_ID,
+    organizationId: ORG_PALERMO_ID,
     name: "Copa Otoño Fútbol 5",
     sport: "futbol5",
     category: "Libre",
@@ -719,7 +754,7 @@ function seedBillingInvoices() {
     const periodEnd = addDaysISO(periodStart, 30);
     billingInvoices.push({
       id: `inv_${billingInvoiceSeq++}`,
-      organizationId: ORG_ID,
+      organizationId: ORG_PALERMO_ID,
       plan: "business",
       amountUSD: 97,
       status: "pagada",
@@ -733,12 +768,285 @@ function seedBillingInvoices() {
 seedBillingInvoices();
 
 // ---------------------------------------------------------------------------
-// Read queries
+// Sesiones (mock — token opaco en un Map, igual que sería una sesión real de
+// Supabase Auth consultada server-side; ver src/lib/session.ts para el lado
+// de las cookies).
 // ---------------------------------------------------------------------------
 
-export function getOrganization(): Organization {
+export type SessionRecord =
+  | { kind: "employee"; employeeId: string; organizationId: string }
+  | { kind: "customer"; customerId: string; organizationId: string }
+  | { kind: "superadmin"; adminId: string };
+
+const sessions = new Map<string, SessionRecord>();
+
+function randomToken(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+export function createSession(record: SessionRecord): string {
+  const token = randomToken();
+  sessions.set(token, record);
+  return token;
+}
+
+export function getSession(token: string | undefined | null): SessionRecord | undefined {
+  if (!token) return undefined;
+  return sessions.get(token);
+}
+
+export function destroySession(token: string | undefined | null) {
+  if (token) sessions.delete(token);
+}
+
+export function verifyEmployeeCredentials(email: string, password: string): Employee | undefined {
+  return employees.find(
+    (e) => e.active && e.email.toLowerCase() === email.trim().toLowerCase() && e.password === password
+  );
+}
+
+export function verifyPlatformAdminCredentials(email: string, password: string): PlatformAdmin | undefined {
+  return platformAdmins.find(
+    (a) => a.email.toLowerCase() === email.trim().toLowerCase() && a.password === password
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Organizaciones (multi-tenant)
+// ---------------------------------------------------------------------------
+
+const RESERVED_SLUGS = new Set([
+  "admin", "superadmin", "login", "registro", "planes", "api",
+  "reservar", "mis-reservas", "torneos", "beneficios", "favicon.ico",
+]);
+
+function slugify(value: string): string {
+  const base = value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || "complejo";
+}
+
+function generateUniqueSlug(name: string): string {
+  const base = slugify(name);
+  let candidate = base;
+  let n = 2;
+  while (organizations.some((o) => o.slug === candidate) || RESERVED_SLUGS.has(candidate)) {
+    candidate = `${base}-${n++}`;
+  }
+  return candidate;
+}
+
+function seedDefaultCourtsFor(organizationId: string) {
+  const padelId = `court_${courtSeq++}`;
+  courts.push({
+    id: padelId, organizationId, name: "Cancha de pádel 1", sport: "padel",
+    surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
+    openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
+    priceRules: withRuleIds(padelId, weekdayPadelRules(15000)), active: true,
+  });
+  const futbolId = `court_${courtSeq++}`;
+  courts.push({
+    id: futbolId, organizationId, name: "Fútbol 5", sport: "futbol5",
+    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
+    openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
+    priceRules: withRuleIds(futbolId, weekdayFutbolRules(18000)), active: true,
+  });
+}
+
+const TRIAL_DAYS = 7;
+
+export function createOrganization(input: {
+  name: string;
+  ownerName: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  planId: PlanId;
+}): { organization: Organization; owner: Employee } {
+  if (employees.some((e) => e.email.toLowerCase() === input.ownerEmail.trim().toLowerCase())) {
+    throw new Error("Ya existe una cuenta con ese email");
+  }
+
+  const organization: Organization = {
+    id: `org_${organizationSeq++}`,
+    name: input.name,
+    slug: generateUniqueSlug(input.name),
+    depositPercentage: 0.3,
+    timezone: "America/Argentina/Buenos_Aires",
+    plan: input.planId,
+    subscriptionStatus: "trialing",
+    billingEmail: input.ownerEmail,
+    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  organizations.push(organization);
+
+  const owner: Employee = {
+    id: `emp_${employeeSeq++}`,
+    organizationId: organization.id,
+    name: input.ownerName,
+    email: input.ownerEmail,
+    password: input.ownerPassword,
+    role: "owner",
+    active: true,
+  };
+  employees.push(owner);
+
+  seedDefaultCourtsFor(organization.id);
+  logAudit(organization.id, owner.id, "Cuenta creada", `${organization.name} · plan ${input.planId} · prueba gratis ${TRIAL_DAYS} días`);
+
+  return { organization, owner };
+}
+
+export function getOrganizationById(organizationId: string): Organization | undefined {
+  return organizations.find((o) => o.id === organizationId);
+}
+
+export function getOrganizationBySlug(slug: string): Organization | undefined {
+  return organizations.find((o) => o.slug === slug);
+}
+
+export function createCourt(organizationId: string, input: {
+  name: string;
+  sport: Sport;
+  surface: CourtSurface;
+  indoor: boolean;
+  lighting: boolean;
+  slotMinutes: number;
+  openTime: string;
+  closeTime: string;
+  basePrice: number;
+}): Court {
+  const id = `court_${courtSeq++}`;
+  const rules = input.sport === "padel" ? weekdayPadelRules(input.basePrice) : weekdayFutbolRules(input.basePrice);
+  const court: Court = {
+    id,
+    organizationId,
+    name: input.name,
+    sport: input.sport,
+    surface: input.surface,
+    indoor: input.indoor,
+    lighting: input.lighting,
+    slotMinutes: input.slotMinutes,
+    openTime: input.openTime,
+    closeTime: input.closeTime,
+    daysOpen: [0, 1, 2, 3, 4, 5, 6],
+    priceRules: withRuleIds(id, rules),
+    active: true,
+  };
+  courts.push(court);
+  return court;
+}
+
+export function findOrCreateGuestCustomer(organizationId: string, input: { name: string; email: string; phone: string }): Customer {
+  const existing = customers.find(
+    (c) => c.organizationId === organizationId && c.email.toLowerCase() === input.email.trim().toLowerCase()
+  );
+  if (existing) {
+    existing.name = input.name || existing.name;
+    existing.phone = input.phone || existing.phone;
+    return existing;
+  }
+  const customer: Customer = {
+    id: `cust_${customerSeq++}`,
+    organizationId,
+    name: input.name,
+    email: input.email,
+    phone: input.phone,
+    loyaltyPoints: 0,
+  };
+  customers.push(customer);
+  return customer;
+}
+
+// ---- Superadmin (cross-tenant) --------------------------------------------
+// Las funciones de acá abajo deliberadamente NO filtran por organizationId —
+// es la única parte de la app pensada para ver todos los tenants a la vez.
+// Nunca se deben usar desde una página del panel de un dueño de cancha.
+
+export function listOrganizations(): Organization[] {
+  return [...organizations].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface OrgSummary {
+  organization: Organization;
+  ownerEmail: string;
+  employeeCount: number;
+  courtCount: number;
+  bookingCount: number;
+}
+
+export function listOrgSummaries(): OrgSummary[] {
+  return listOrganizations().map((organization) => {
+    const owner = employees.find((e) => e.organizationId === organization.id && e.role === "owner");
+    return {
+      organization,
+      ownerEmail: owner?.email ?? organization.billingEmail ?? "—",
+      employeeCount: employees.filter((e) => e.organizationId === organization.id).length,
+      courtCount: courts.filter((c) => c.organizationId === organization.id).length,
+      bookingCount: bookings.filter((b) => b.organizationId === organization.id).length,
+    };
+  });
+}
+
+export interface PlatformStats {
+  totalOrgs: number;
+  trialingCount: number;
+  activeCount: number;
+  pastDueCount: number;
+  canceledCount: number;
+  trialsEndingSoon: number;
+  mrrUSD: number;
+  planDistribution: { planId: PlanId; count: number }[];
+}
+
+export function getPlatformStats(): PlatformStats {
+  const byStatus = (status: SubscriptionStatus) => organizations.filter((o) => o.subscriptionStatus === status).length;
+  const trialsEndingSoon = organizations.filter((o) => {
+    if (o.subscriptionStatus !== "trialing" || !o.trialEndsAt) return false;
+    const daysLeft = (new Date(o.trialEndsAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    return daysLeft >= 0 && daysLeft <= 3;
+  }).length;
+  const mrrUSD = organizations
+    .filter((o) => o.subscriptionStatus === "active")
+    .reduce((sum, o) => sum + (getPlan(o.plan)?.priceUSD ?? 0), 0);
+  const planDistribution = PLANS.map((p) => ({
+    planId: p.id,
+    count: organizations.filter((o) => o.plan === p.id).length,
+  }));
+
+  return {
+    totalOrgs: organizations.length,
+    trialingCount: byStatus("trialing"),
+    activeCount: byStatus("active"),
+    pastDueCount: byStatus("past_due"),
+    canceledCount: byStatus("canceled"),
+    trialsEndingSoon,
+    mrrUSD,
+    planDistribution,
+  };
+}
+
+export function adminChangePlan(organizationId: string, planId: PlanId): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
+  organization.plan = planId;
   return organization;
 }
+
+export function adminSetSubscriptionStatus(organizationId: string, status: SubscriptionStatus): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
+  organization.subscriptionStatus = status;
+  return organization;
+}
+
+// ---------------------------------------------------------------------------
+// Read queries (tenant-scoped: siempre reciben organizationId)
+// ---------------------------------------------------------------------------
 
 export function listPlans(): Plan[] {
   return PLANS;
@@ -752,16 +1060,19 @@ export function priceInArs(priceUSD: number): number {
   return priceUSD * USD_TO_ARS;
 }
 
-export function listBillingInvoices(): BillingInvoice[] {
-  return [...billingInvoices].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+export function listBillingInvoices(organizationId: string): BillingInvoice[] {
+  return billingInvoices
+    .filter((i) => i.organizationId === organizationId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
 export type AccessState =
   | { blocked: false; trialDaysLeft?: number }
   | { blocked: true; reason: "trial_expired" | "canceled" | "past_due" };
 
-export function computeAccessState(): AccessState {
-  const org = organization;
+export function computeAccessState(organizationId: string): AccessState {
+  const org = getOrganizationById(organizationId);
+  if (!org) return { blocked: true, reason: "canceled" };
   if (org.subscriptionStatus === "canceled") return { blocked: true, reason: "canceled" };
   if (org.subscriptionStatus === "past_due") return { blocked: true, reason: "past_due" };
 
@@ -777,160 +1088,169 @@ export function computeAccessState(): AccessState {
   return { blocked: false };
 }
 
-export function hasFeatureAccess(group: PlanFeatureGroup): boolean {
-  const plan = getPlan(organization.plan);
+export function hasFeatureAccess(organizationId: string, group: PlanFeatureGroup): boolean {
+  const org = getOrganizationById(organizationId);
+  const plan = org ? getPlan(org.plan) : undefined;
   return plan ? plan.featureGroups.includes(group) : false;
 }
 
-export function listEmployees(): Employee[] {
-  return employees;
+export function listEmployees(organizationId: string): Employee[] {
+  return employees.filter((e) => e.organizationId === organizationId);
 }
 
-export function listCourts(): Court[] {
-  return courts;
+export function getEmployeeById(organizationId: string, employeeId: string): Employee | undefined {
+  return employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
 }
 
-export function getCourt(courtId: string): Court | undefined {
-  return courts.find((c) => c.id === courtId);
+export function listCourts(organizationId: string): Court[] {
+  return courts.filter((c) => c.organizationId === organizationId);
 }
 
-export function listCustomers(): Customer[] {
-  return customers;
+export function getCourt(organizationId: string, courtId: string): Court | undefined {
+  return courts.find((c) => c.id === courtId && c.organizationId === organizationId);
 }
 
-export function getCustomer(customerId: string): Customer | undefined {
-  return customers.find((c) => c.id === customerId);
+export function listCustomers(organizationId: string): Customer[] {
+  return customers.filter((c) => c.organizationId === organizationId);
 }
 
-export function listBookings(): Booking[] {
-  return bookings;
+export function getCustomer(organizationId: string, customerId: string): Customer | undefined {
+  return customers.find((c) => c.id === customerId && c.organizationId === organizationId);
 }
 
-export function listBookingsForDate(dateISO: string): Booking[] {
-  return bookings.filter((b) => b.date === dateISO);
+export function listBookings(organizationId: string): Booking[] {
+  return bookings.filter((b) => b.organizationId === organizationId);
 }
 
-export function listBookingsForCourtAndDate(courtId: string, dateISO: string): Booking[] {
-  return bookings.filter((b) => b.courtId === courtId && b.date === dateISO);
+export function listBookingsForDate(organizationId: string, dateISO: string): Booking[] {
+  return bookings.filter((b) => b.organizationId === organizationId && b.date === dateISO);
 }
 
-export function listBookingsForCustomer(customerId: string): Booking[] {
+export function listBookingsForCourtAndDate(organizationId: string, courtId: string, dateISO: string): Booking[] {
+  return bookings.filter((b) => b.organizationId === organizationId && b.courtId === courtId && b.date === dateISO);
+}
+
+export function listBookingsForCustomer(organizationId: string, customerId: string): Booking[] {
   return bookings
-    .filter((b) => b.customerId === customerId)
+    .filter((b) => b.organizationId === organizationId && b.customerId === customerId)
     .sort((a, b) => (a.date + a.startTime < b.date + b.startTime ? 1 : -1));
 }
 
-export function getBooking(bookingId: string): Booking | undefined {
-  return bookings.find((b) => b.id === bookingId);
+export function getBooking(organizationId: string, bookingId: string): Booking | undefined {
+  return bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
 }
 
-export function getSlotsForCourt(courtId: string, dateISO: string) {
-  const court = getCourt(courtId);
+export function getSlotsForCourt(organizationId: string, courtId: string, dateISO: string) {
+  const court = getCourt(organizationId, courtId);
   if (!court) return [];
 
-  return generateSlots(court, dateISO, bookings).map((slot) => {
-    const promotion = findApplicablePromotion(promotions, court, dateISO, slot.startTime);
+  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
+  const orgPromotions = promotions.filter((p) => p.organizationId === organizationId);
+
+  return generateSlots(court, dateISO, orgBookings).map((slot) => {
+    const promotion = findApplicablePromotion(orgPromotions, court, dateISO, slot.startTime);
     const { finalPrice, discountLabel } = applyPromotion(slot.basePrice, promotion);
     return { ...slot, price: finalPrice, discountLabel };
   });
 }
 
-export function listProductCategories(): ProductCategory[] {
-  return productCategories;
+export function listProductCategories(organizationId: string): ProductCategory[] {
+  return productCategories.filter((c) => c.organizationId === organizationId);
 }
 
-export function listProducts(): Product[] {
-  return products;
+export function listProducts(organizationId: string): Product[] {
+  return products.filter((p) => p.organizationId === organizationId);
 }
 
-export function getProduct(productId: string): Product | undefined {
-  return products.find((p) => p.id === productId);
+export function getProduct(organizationId: string, productId: string): Product | undefined {
+  return products.find((p) => p.id === productId && p.organizationId === organizationId);
 }
 
-export function listLowStockProducts(): Product[] {
-  return products.filter((p) => p.active && p.stock <= p.minStock);
+export function listLowStockProducts(organizationId: string): Product[] {
+  return products.filter((p) => p.organizationId === organizationId && p.active && p.stock <= p.minStock);
 }
 
-export function listExpenses(): Expense[] {
-  return [...expenses].sort((a, b) => (a.date < b.date ? 1 : -1));
+export function listExpenses(organizationId: string): Expense[] {
+  return expenses.filter((e) => e.organizationId === organizationId).sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
-export function listExpensesForMonth(yearMonth: string): Expense[] {
-  return listExpenses().filter((e) => e.date.startsWith(yearMonth));
+export function listExpensesForMonth(organizationId: string, yearMonth: string): Expense[] {
+  return listExpenses(organizationId).filter((e) => e.date.startsWith(yearMonth));
 }
 
-export function getOpenCashSession(): CashRegisterSession | undefined {
-  return cashSessions.find((s) => s.status === "abierta");
+export function getOpenCashSession(organizationId: string): CashRegisterSession | undefined {
+  return cashSessions.find((s) => s.organizationId === organizationId && s.status === "abierta");
 }
 
-export function listCashSessions(): CashRegisterSession[] {
-  return [...cashSessions].sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
+export function listCashSessions(organizationId: string): CashRegisterSession[] {
+  return cashSessions
+    .filter((s) => s.organizationId === organizationId)
+    .sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
 }
 
-export function getCashSession(sessionId: string): CashRegisterSession | undefined {
-  return cashSessions.find((s) => s.id === sessionId);
+export function getCashSession(organizationId: string, sessionId: string): CashRegisterSession | undefined {
+  return cashSessions.find((s) => s.id === sessionId && s.organizationId === organizationId);
 }
 
-export function listCashMovements(sessionId: string): CashMovement[] {
+export function listCashMovements(organizationId: string, sessionId: string): CashMovement[] {
   return cashMovements
-    .filter((m) => m.cashSessionId === sessionId)
+    .filter((m) => m.organizationId === organizationId && m.cashSessionId === sessionId)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
-export function listSales(): Sale[] {
-  return [...sales].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+export function listSales(organizationId: string): Sale[] {
+  return sales.filter((s) => s.organizationId === organizationId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
-export function listSalesForSession(sessionId: string): Sale[] {
-  return sales.filter((s) => s.cashSessionId === sessionId);
+export function listSalesForSession(organizationId: string, sessionId: string): Sale[] {
+  return sales.filter((s) => s.organizationId === organizationId && s.cashSessionId === sessionId);
 }
 
-export function listAuditLog(): AuditLogEntry[] {
-  return auditLog;
+export function listAuditLog(organizationId: string): AuditLogEntry[] {
+  return auditLog.filter((a) => a.organizationId === organizationId);
 }
 
-// The mock session: everything in this MVP acts as this logged-in employee
-// (the owner) until real Supabase Auth + role-based access replaces it.
-export function getCurrentEmployee(): Employee {
-  return employees[0];
-}
-
-export function listPromotions(): Promotion[] {
-  return promotions;
+export function listPromotions(organizationId: string): Promotion[] {
+  return promotions.filter((p) => p.organizationId === organizationId);
 }
 
 export function listLoyaltyRewards(): LoyaltyReward[] {
   return loyaltyRewards;
 }
 
-export function listLoyaltyRedemptions(customerId: string): LoyaltyRedemption[] {
-  return loyaltyRedemptions.filter((r) => r.customerId === customerId);
+export function listLoyaltyRedemptions(organizationId: string, customerId: string): LoyaltyRedemption[] {
+  return loyaltyRedemptions.filter((r) => r.organizationId === organizationId && r.customerId === customerId);
 }
 
-export function listWaitlistForCustomer(customerId: string): WaitlistEntry[] {
-  return waitlist.filter((w) => w.customerId === customerId);
+export function listWaitlistForCustomer(organizationId: string, customerId: string): WaitlistEntry[] {
+  return waitlist.filter((w) => w.organizationId === organizationId && w.customerId === customerId);
 }
 
-export function listWaitlistForSlot(courtId: string, date: string, startTime: string): WaitlistEntry[] {
+export function listWaitlistForSlot(organizationId: string, courtId: string, date: string, startTime: string): WaitlistEntry[] {
   return waitlist.filter(
-    (w) => w.courtId === courtId && w.date === date && w.startTime === startTime && w.status === "esperando"
+    (w) =>
+      w.organizationId === organizationId &&
+      w.courtId === courtId &&
+      w.date === date &&
+      w.startTime === startTime &&
+      w.status === "esperando"
   );
 }
 
-export function listNotifications(): NotificationEntry[] {
-  return notifications;
+export function listNotifications(organizationId: string): NotificationEntry[] {
+  return notifications.filter((n) => n.organizationId === organizationId);
 }
 
-export function listNotificationsForCustomer(customerId: string): NotificationEntry[] {
-  return notifications.filter((n) => n.customerId === customerId);
+export function listNotificationsForCustomer(organizationId: string, customerId: string): NotificationEntry[] {
+  return notifications.filter((n) => n.organizationId === organizationId && n.customerId === customerId);
 }
 
-export function listTournaments(): Tournament[] {
-  return [...tournaments].sort((a, b) => (a.date < b.date ? -1 : 1));
+export function listTournaments(organizationId: string): Tournament[] {
+  return tournaments.filter((t) => t.organizationId === organizationId).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-export function getTournament(tournamentId: string): Tournament | undefined {
-  return tournaments.find((t) => t.id === tournamentId);
+export function getTournament(organizationId: string, tournamentId: string): Tournament | undefined {
+  return tournaments.find((t) => t.id === tournamentId && t.organizationId === organizationId);
 }
 
 export function listTeamsForTournament(tournamentId: string): TournamentTeam[] {
@@ -947,14 +1267,18 @@ export function listMatchesForTournament(tournamentId: string): TournamentMatch[
     .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
 }
 
-export function computeRanking(): RankingEntry[] {
+export function computeRanking(organizationId: string): RankingEntry[] {
+  const orgTournamentIds = new Set(tournaments.filter((t) => t.organizationId === organizationId).map((t) => t.id));
+
   const roundsByTournament = new Map<string, number>();
   for (const m of tournamentMatches) {
+    if (!orgTournamentIds.has(m.tournamentId)) continue;
     roundsByTournament.set(m.tournamentId, Math.max(roundsByTournament.get(m.tournamentId) ?? 0, m.round));
   }
 
   const pointsMap = new Map<string, RankingEntry>();
   for (const m of tournamentMatches) {
+    if (!orgTournamentIds.has(m.tournamentId)) continue;
     if (m.status !== "jugado" || !m.winnerTeamId) continue;
     const team = tournamentTeams.find((t) => t.id === m.winnerTeamId);
     if (!team) continue;
@@ -1013,12 +1337,14 @@ function countPossibleSlots(court: Court, dates: string[]): number {
   return dates.reduce((sum, date) => sum + listSlotStarts(court, date).length, 0);
 }
 
-export function computeCourtRevenueRanking() {
+export function computeCourtRevenueRanking(organizationId: string) {
   const dates = new Set(historicalDateRange());
-  const historical = bookings.filter((b) => dates.has(b.date) && DEMAND_STATUSES.has(b.status));
+  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
+  const historical = bookings.filter(
+    (b) => b.organizationId === organizationId && dates.has(b.date) && DEMAND_STATUSES.has(b.status)
+  );
 
-  return courts
-    .filter((c) => c.active)
+  return orgCourts
     .map((court) => {
       const courtBookings = historical.filter((b) => b.courtId === court.id);
       const revenue = courtBookings.reduce((sum, b) => sum + b.totalPrice, 0);
@@ -1028,16 +1354,19 @@ export function computeCourtRevenueRanking() {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
-export function computeHourBandStats() {
+export function computeHourBandStats(organizationId: string) {
   const dates = new Set(historicalDateRange());
-  const historical = bookings.filter((b) => dates.has(b.date) && DEMAND_STATUSES.has(b.status));
+  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
+  const historical = bookings.filter(
+    (b) => b.organizationId === organizationId && dates.has(b.date) && DEMAND_STATUSES.has(b.status)
+  );
 
   return HOUR_BANDS.map((band) => {
     const inBand = historical.filter((b) => hourBandFor(b.startTime).label === band.label);
     const revenue = inBand.reduce((sum, b) => sum + b.totalPrice, 0);
 
     let possible = 0;
-    for (const court of courts.filter((c) => c.active)) {
+    for (const court of orgCourts) {
       for (const date of dates) {
         possible += listSlotStarts(court, date).filter((s) => hourBandFor(s).label === band.label).length;
       }
@@ -1046,15 +1375,18 @@ export function computeHourBandStats() {
   });
 }
 
-export function computeWeekdayStats() {
+export function computeWeekdayStats(organizationId: string) {
   const dates = historicalDateRange();
-  const historical = bookings.filter((b) => dates.includes(b.date) && DEMAND_STATUSES.has(b.status));
+  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
+  const historical = bookings.filter(
+    (b) => b.organizationId === organizationId && dates.includes(b.date) && DEMAND_STATUSES.has(b.status)
+  );
 
   return WEEKDAY_LABELS.map((label, dow) => {
     const datesForDow = dates.filter((d) => dayOfWeek(d) === dow);
     const bookingsForDow = historical.filter((b) => datesForDow.includes(b.date));
     let possible = 0;
-    for (const court of courts.filter((c) => c.active)) possible += countPossibleSlots(court, datesForDow);
+    for (const court of orgCourts) possible += countPossibleSlots(court, datesForDow);
     return { dow, label, occupancyPct: possible ? bookingsForDow.length / possible : 0 };
   });
 }
@@ -1071,12 +1403,15 @@ export interface DemandRecommendation {
 // Combinaciones cancha + día + franja horaria con más baja ocupación
 // histórica (con al menos `minSamples` turnos posibles, para no recomendar
 // en base a 1 sola fecha). Pensado para alimentar "creá una promo acá".
-export function computeLowDemandRecommendations(limit = 3): DemandRecommendation[] {
+export function computeLowDemandRecommendations(organizationId: string, limit = 3): DemandRecommendation[] {
   const dates = historicalDateRange();
-  const historical = bookings.filter((b) => dates.includes(b.date) && DEMAND_STATUSES.has(b.status));
+  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
+  const historical = bookings.filter(
+    (b) => b.organizationId === organizationId && dates.includes(b.date) && DEMAND_STATUSES.has(b.status)
+  );
 
   const buckets = new Map<string, { court: Court; dow: number; band: string; possible: number; taken: number }>();
-  for (const court of courts.filter((c) => c.active)) {
+  for (const court of orgCourts) {
     for (const date of dates) {
       const dow = dayOfWeek(date);
       for (const start of listSlotStarts(court, date)) {
@@ -1108,50 +1443,56 @@ export function computeLowDemandRecommendations(limit = 3): DemandRecommendation
     .slice(0, limit);
 }
 
-export function computeHighDemandBand(): DemandRecommendation | undefined {
-  const recs = computeLowDemandRecommendations(1000);
+export function computeHighDemandBand(organizationId: string): DemandRecommendation | undefined {
+  const recs = computeLowDemandRecommendations(organizationId, 1000);
   if (recs.length === 0) return undefined;
   return [...recs].sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
 }
 
-export function computePaymentMethodTotals() {
+export function computePaymentMethodTotals(organizationId: string) {
   const totals = new Map<PaymentMethod, number>();
-  for (const b of bookings) {
+  for (const b of bookings.filter((b) => b.organizationId === organizationId)) {
     for (const p of b.payments) totals.set(p.method, (totals.get(p.method) ?? 0) + p.amount);
   }
-  for (const s of sales) {
+  for (const s of sales.filter((s) => s.organizationId === organizationId)) {
     totals.set(s.method, (totals.get(s.method) ?? 0) + s.total);
   }
   return [...totals.entries()].map(([method, amount]) => ({ method, amount })).sort((a, b) => b.amount - a.amount);
 }
 
-export function computeRevenueByCategory() {
-  const canchas = bookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
-  const productos = sales.reduce((sum, s) => sum + s.total, 0);
-  const torneos = tournaments.reduce((sum, t) => {
+export function computeRevenueByCategory(organizationId: string) {
+  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
+  const orgSales = sales.filter((s) => s.organizationId === organizationId);
+  const orgTournaments = tournaments.filter((t) => t.organizationId === organizationId);
+
+  const canchas = orgBookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
+  const productos = orgSales.reduce((sum, s) => sum + s.total, 0);
+  const torneos = orgTournaments.reduce((sum, t) => {
     const registered = tournamentTeams.filter((team) => team.tournamentId === t.id && team.paidEntry).length;
     return sum + registered * t.entryFee;
   }, 0);
   return { canchas, productos, torneos, total: canchas + productos + torneos };
 }
 
-export function computeProfitAndLoss() {
-  const { total: ingresos } = computeRevenueByCategory();
-  const gastos = expenses.reduce((sum, e) => sum + e.amount, 0);
+export function computeProfitAndLoss(organizationId: string) {
+  const { total: ingresos } = computeRevenueByCategory(organizationId);
+  const gastos = expenses.filter((e) => e.organizationId === organizationId).reduce((sum, e) => sum + e.amount, 0);
   return { ingresos, gastos, resultado: ingresos - gastos, margin: ingresos ? (ingresos - gastos) / ingresos : 0 };
 }
 
-export function computeDailyRevenue(days = 14) {
+export function computeDailyRevenue(organizationId: string, days = 14) {
   const today = todayISO();
   const result: { date: string; canchas: number; productos: number; total: number }[] = [];
+  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
+  const orgSales = sales.filter((s) => s.organizationId === organizationId);
 
   for (let offset = -(days - 1); offset <= 0; offset++) {
     const date = addDaysISO(today, offset);
-    const canchas = bookings
+    const canchas = orgBookings
       .flatMap((b) => b.payments)
       .filter((p) => p.paidAt.startsWith(date))
       .reduce((sum, p) => sum + p.amount, 0);
-    const productos = sales.filter((s) => s.createdAt.startsWith(date)).reduce((sum, s) => sum + s.total, 0);
+    const productos = orgSales.filter((s) => s.createdAt.startsWith(date)).reduce((sum, s) => sum + s.total, 0);
     result.push({ date, canchas, productos, total: canchas + productos });
   }
   return result;
@@ -1161,34 +1502,42 @@ export function computeDailyRevenue(days = 14) {
 // Mutations (mock — swap for Supabase inserts/updates later)
 // ---------------------------------------------------------------------------
 
-export function isSlotAvailable(courtId: string, date: string, startTime: string): boolean {
+export function isSlotAvailable(organizationId: string, courtId: string, date: string, startTime: string): boolean {
   return !bookings.some(
-    (b) => b.courtId === courtId && b.date === date && b.startTime === startTime && BLOCKING_STATUSES.has(b.status)
+    (b) =>
+      b.organizationId === organizationId &&
+      b.courtId === courtId &&
+      b.date === date &&
+      b.startTime === startTime &&
+      BLOCKING_STATUSES.has(b.status)
   );
 }
 
-export function createPendingBooking(input: {
+export function createPendingBooking(organizationId: string, input: {
   courtId: string;
   customerId: string;
   date: string;
   startTime: string;
   recurringGroupId?: string;
 }): Booking {
-  const court = getCourt(input.courtId);
+  const court = getCourt(organizationId, input.courtId);
   if (!court) throw new Error("Cancha no encontrada");
-  if (!isSlotAvailable(input.courtId, input.date, input.startTime)) {
+  if (!isSlotAvailable(organizationId, input.courtId, input.date, input.startTime)) {
     throw new Error("Ese horario ya no está disponible");
   }
+  const org = getOrganizationById(organizationId);
+  if (!org) throw new Error("Organización no encontrada");
 
   const endMinutes = timeToMinutes(input.startTime) + court.slotMinutes;
   const basePrice = resolveSlotPrice(court, input.date, input.startTime);
-  const promotion = findApplicablePromotion(promotions, court, input.date, input.startTime);
+  const orgPromotions = promotions.filter((p) => p.organizationId === organizationId);
+  const promotion = findApplicablePromotion(orgPromotions, court, input.date, input.startTime);
   const { finalPrice, discountLabel } = applyPromotion(basePrice, promotion);
-  const { depositAmount, balanceAmount } = computeDeposit(finalPrice, organization);
+  const { depositAmount, balanceAmount } = computeDeposit(finalPrice, org);
 
   const booking: Booking = {
     id: `bk_manual_${bookingSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     courtId: input.courtId,
     customerId: input.customerId,
     date: input.date,
@@ -1207,8 +1556,8 @@ export function createPendingBooking(input: {
   return booking;
 }
 
-export function payDeposit(bookingId: string, method: BookingPayment["method"] = "mercado_pago"): Booking {
-  const booking = bookings.find((b) => b.id === bookingId);
+export function payDeposit(organizationId: string, bookingId: string, method: BookingPayment["method"] = "mercado_pago"): Booking {
+  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
   if (!booking) throw new Error("Reserva no encontrada");
 
   booking.payments.push({
@@ -1223,8 +1572,9 @@ export function payDeposit(bookingId: string, method: BookingPayment["method"] =
   booking.status = "sena_pagada";
   awardLoyaltyPoints(booking.customerId, booking.depositAmount);
 
-  const court = getCourt(booking.courtId);
+  const court = getCourt(organizationId, booking.courtId);
   notify(
+    organizationId,
     booking.customerId,
     "reserva_confirmada",
     `Tu reserva quedó confirmada para el ${booking.date} a las ${booking.startTime} en ${court?.name ?? "tu cancha"}.`
@@ -1233,8 +1583,8 @@ export function payDeposit(bookingId: string, method: BookingPayment["method"] =
   return booking;
 }
 
-export function collectBalance(bookingId: string, method: BookingPayment["method"]): Booking {
-  const booking = bookings.find((b) => b.id === bookingId);
+export function collectBalance(organizationId: string, employeeId: string, bookingId: string, method: BookingPayment["method"]): Booking {
+  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
   if (!booking) throw new Error("Reserva no encontrada");
 
   booking.payments.push({
@@ -1248,22 +1598,21 @@ export function collectBalance(bookingId: string, method: BookingPayment["method
   });
   booking.status = "confirmada";
 
-  const employee = getCurrentEmployee();
-  const openSession = getOpenCashSession();
+  const openSession = getOpenCashSession(organizationId);
   if (openSession) {
     cashMovements.push({
       id: `cmov_${cashMovementSeq++}`,
-      organizationId: ORG_ID,
+      organizationId,
       cashSessionId: openSession.id,
       type: "cobro_reserva",
       amount: booking.balanceAmount,
       method,
       concept: `Saldo reserva #${booking.id.slice(-6)}`,
-      employeeId: employee.id,
+      employeeId,
       createdAt: new Date().toISOString(),
     });
   }
-  logAudit(employee.id, "Cobro de saldo", `Reserva #${booking.id.slice(-6)} — ${formatArs(booking.balanceAmount)} (${method})`);
+  logAudit(organizationId, employeeId, "Cobro de saldo", `Reserva #${booking.id.slice(-6)} — ${formatArs(booking.balanceAmount)} (${method})`);
   awardLoyaltyPoints(booking.customerId, booking.balanceAmount);
 
   return booking;
@@ -1277,38 +1626,45 @@ const AUDITED_STATUS_LABELS: Partial<Record<BookingStatus, string>> = {
   finalizada: "Turno finalizado",
 };
 
-export function updateBookingStatus(bookingId: string, status: BookingStatus): Booking {
-  const booking = bookings.find((b) => b.id === bookingId);
+export function updateBookingStatus(organizationId: string, employeeId: string, bookingId: string, status: BookingStatus): Booking {
+  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
   if (!booking) throw new Error("Reserva no encontrada");
   booking.status = status;
 
   const label = AUDITED_STATUS_LABELS[status];
   if (label) {
-    logAudit(getCurrentEmployee().id, label, `Reserva #${booking.id.slice(-6)}`);
+    logAudit(organizationId, employeeId, label, `Reserva #${booking.id.slice(-6)}`);
   }
 
   if (status === "cancelada") {
-    const court = getCourt(booking.courtId);
+    const court = getCourt(organizationId, booking.courtId);
     notify(
+      organizationId,
       booking.customerId,
       "cancelacion",
       `Se canceló tu reserva del ${booking.date} a las ${booking.startTime} en ${court?.name ?? "la cancha"}.`
     );
-    notifyWaitlist(booking.courtId, booking.date, booking.startTime);
+    notifyWaitlist(organizationId, booking.courtId, booking.date, booking.startTime);
   }
 
   return booking;
 }
 
-function notifyWaitlist(courtId: string, date: string, startTime: string) {
-  const court = getCourt(courtId);
+function notifyWaitlist(organizationId: string, courtId: string, date: string, startTime: string) {
+  const court = getCourt(organizationId, courtId);
   const waiting = waitlist.filter(
-    (w) => w.courtId === courtId && w.date === date && w.startTime === startTime && w.status === "esperando"
+    (w) =>
+      w.organizationId === organizationId &&
+      w.courtId === courtId &&
+      w.date === date &&
+      w.startTime === startTime &&
+      w.status === "esperando"
   );
   for (const entry of waiting) {
     entry.status = "notificado";
     entry.notifiedAt = new Date().toISOString();
     notify(
+      organizationId,
       entry.customerId,
       "lista_espera_liberada",
       `¡Se liberó tu horario en ${court?.name ?? "la cancha"} el ${date} a las ${startTime}! Reservalo antes de que se lo lleve otro.`
@@ -1320,52 +1676,52 @@ function notifyWaitlist(courtId: string, date: string, startTime: string) {
 // Fase 2 mutations: inventario, caja/POS, gastos, empleados
 // ---------------------------------------------------------------------------
 
-export function adjustStock(productId: string, delta: number, reason: string): Product {
-  const product = products.find((p) => p.id === productId);
+export function adjustStock(organizationId: string, employeeId: string, productId: string, delta: number, reason: string): Product {
+  const product = products.find((p) => p.id === productId && p.organizationId === organizationId);
   if (!product) throw new Error("Producto no encontrado");
   product.stock = Math.max(0, product.stock + delta);
-  logAudit(getCurrentEmployee().id, "Ajuste de stock", `${product.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`);
+  logAudit(organizationId, employeeId, "Ajuste de stock", `${product.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`);
   return product;
 }
 
-export function openCashSession(employeeId: string, openingAmount: number): CashRegisterSession {
-  if (getOpenCashSession()) throw new Error("Ya hay una caja abierta");
+export function openCashSession(organizationId: string, employeeId: string, openingAmount: number): CashRegisterSession {
+  if (getOpenCashSession(organizationId)) throw new Error("Ya hay una caja abierta");
 
   const session: CashRegisterSession = {
     id: `cash_${cashSessionSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     employeeId,
     status: "abierta",
     openingAmount,
     openedAt: new Date().toISOString(),
   };
   cashSessions.push(session);
-  logAudit(employeeId, "Apertura de caja", `Monto inicial ${formatArs(openingAmount)}`);
+  logAudit(organizationId, employeeId, "Apertura de caja", `Monto inicial ${formatArs(openingAmount)}`);
   return session;
 }
 
-export function closeCashSession(sessionId: string, countedAmount: number): CashRegisterSession {
-  const session = cashSessions.find((s) => s.id === sessionId);
+export function closeCashSession(organizationId: string, employeeId: string, sessionId: string, countedAmount: number): CashRegisterSession {
+  const session = cashSessions.find((s) => s.id === sessionId && s.organizationId === organizationId);
   if (!session) throw new Error("Caja no encontrada");
 
   session.status = "cerrada";
   session.closingCountedAmount = countedAmount;
   session.closedAt = new Date().toISOString();
-  logAudit(getCurrentEmployee().id, "Cierre de caja", `Caja cerrada con ${formatArs(countedAmount)} contados`);
+  logAudit(organizationId, employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(countedAmount)} contados`);
   return session;
 }
 
-export function createSale(input: {
+export function createSale(organizationId: string, input: {
   employeeId: string;
   items: { productId: string; quantity: number }[];
   method: PaymentMethod;
 }): Sale {
-  const openSession = getOpenCashSession();
+  const openSession = getOpenCashSession(organizationId);
   if (!openSession) throw new Error("No hay una caja abierta");
   if (input.items.length === 0) throw new Error("La venta no tiene productos");
 
   const items: SaleItem[] = input.items.map(({ productId, quantity }) => {
-    const product = products.find((p) => p.id === productId);
+    const product = products.find((p) => p.id === productId && p.organizationId === organizationId);
     if (!product) throw new Error("Producto no encontrado");
     if (product.stock < quantity) throw new Error(`Stock insuficiente de ${product.name}`);
     return { productId, name: product.name, quantity, unitPrice: product.price };
@@ -1379,7 +1735,7 @@ export function createSale(input: {
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
   const sale: Sale = {
     id: `sale_${saleSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     cashSessionId: openSession.id,
     employeeId: input.employeeId,
     items,
@@ -1391,7 +1747,7 @@ export function createSale(input: {
 
   cashMovements.push({
     id: `cmov_${cashMovementSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     cashSessionId: openSession.id,
     type: "venta",
     amount: total,
@@ -1401,11 +1757,11 @@ export function createSale(input: {
     createdAt: sale.createdAt,
   });
 
-  logAudit(input.employeeId, "Venta registrada", `${formatArs(total)} — ${sale.items.map((it) => it.name).join(", ")}`);
+  logAudit(organizationId, input.employeeId, "Venta registrada", `${formatArs(total)} — ${sale.items.map((it) => it.name).join(", ")}`);
   return sale;
 }
 
-export function addExpense(input: {
+export function addExpense(organizationId: string, input: {
   employeeId: string;
   category: ExpenseCategory;
   description: string;
@@ -1414,17 +1770,17 @@ export function addExpense(input: {
 }): Expense {
   const expense: Expense = {
     id: `exp_${expenseSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     ...input,
     createdAt: new Date().toISOString(),
   };
   expenses.push(expense);
 
-  const openSession = getOpenCashSession();
+  const openSession = getOpenCashSession(organizationId);
   if (openSession && expense.date === todayISO()) {
     cashMovements.push({
       id: `cmov_${cashMovementSeq++}`,
-      organizationId: ORG_ID,
+      organizationId,
       cashSessionId: openSession.id,
       type: "gasto",
       amount: -expense.amount,
@@ -1435,35 +1791,33 @@ export function addExpense(input: {
     });
   }
 
-  logAudit(input.employeeId, "Gasto registrado", `${expense.description} — ${formatArs(expense.amount)}`);
+  logAudit(organizationId, input.employeeId, "Gasto registrado", `${expense.description} — ${formatArs(expense.amount)}`);
   return expense;
 }
 
-export function addEmployee(input: { name: string; email: string; role: EmployeeRole }): Employee {
-  const employee: Employee = {
-    id: `emp_${employees.length + 1}`,
-    organizationId: ORG_ID,
-    active: true,
-    ...input,
-  };
+export function addEmployee(organizationId: string, actorEmployeeId: string, input: { name: string; email: string; role: EmployeeRole; password: string }): Employee {
+  if (employees.some((e) => e.email.toLowerCase() === input.email.trim().toLowerCase())) {
+    throw new Error("Ya existe un usuario con ese email");
+  }
+  const employee: Employee = { id: `emp_${employeeSeq++}`, organizationId, active: true, ...input };
   employees.push(employee);
-  logAudit(getCurrentEmployee().id, "Empleado agregado", `${employee.name} (${employee.role})`);
+  logAudit(organizationId, actorEmployeeId, "Empleado agregado", `${employee.name} (${employee.role})`);
   return employee;
 }
 
-export function updateEmployeeRole(employeeId: string, role: EmployeeRole): Employee {
-  const employee = employees.find((e) => e.id === employeeId);
+export function updateEmployeeRole(organizationId: string, actorEmployeeId: string, employeeId: string, role: EmployeeRole): Employee {
+  const employee = employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
   if (!employee) throw new Error("Empleado no encontrado");
   employee.role = role;
-  logAudit(getCurrentEmployee().id, "Rol actualizado", `${employee.name} ahora es ${role}`);
+  logAudit(organizationId, actorEmployeeId, "Rol actualizado", `${employee.name} ahora es ${role}`);
   return employee;
 }
 
-export function setEmployeeActive(employeeId: string, active: boolean): Employee {
-  const employee = employees.find((e) => e.id === employeeId);
+export function setEmployeeActive(organizationId: string, actorEmployeeId: string, employeeId: string, active: boolean): Employee {
+  const employee = employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
   if (!employee) throw new Error("Empleado no encontrado");
   employee.active = active;
-  logAudit(getCurrentEmployee().id, active ? "Empleado reactivado" : "Empleado desactivado", employee.name);
+  logAudit(organizationId, actorEmployeeId, active ? "Empleado reactivado" : "Empleado desactivado", employee.name);
   return employee;
 }
 
@@ -1472,7 +1826,7 @@ export function setEmployeeActive(employeeId: string, active: boolean): Employee
 // promociones, torneos
 // ---------------------------------------------------------------------------
 
-export function createRecurringBooking(input: {
+export function createRecurringBooking(organizationId: string, input: {
   courtId: string;
   customerId: string;
   startDate: string;
@@ -1485,27 +1839,28 @@ export function createRecurringBooking(input: {
 
   for (let i = 0; i < input.weeks; i++) {
     const date = addDaysISO(input.startDate, i * 7);
-    if (!isSlotAvailable(input.courtId, date, input.startTime)) {
+    if (!isSlotAvailable(organizationId, input.courtId, date, input.startTime)) {
       skipped.push(date);
       continue;
     }
-    const booking = createPendingBooking({
+    const booking = createPendingBooking(organizationId, {
       courtId: input.courtId,
       customerId: input.customerId,
       date,
       startTime: input.startTime,
       recurringGroupId: groupId,
     });
-    payDeposit(booking.id, "mercado_pago");
+    payDeposit(organizationId, booking.id, "mercado_pago");
     created.push(booking);
   }
 
   return { created, skipped };
 }
 
-export function joinWaitlist(customerId: string, courtId: string, date: string, startTime: string): WaitlistEntry {
+export function joinWaitlist(organizationId: string, customerId: string, courtId: string, date: string, startTime: string): WaitlistEntry {
   const existing = waitlist.find(
     (w) =>
+      w.organizationId === organizationId &&
       w.customerId === customerId &&
       w.courtId === courtId &&
       w.date === date &&
@@ -1516,7 +1871,7 @@ export function joinWaitlist(customerId: string, courtId: string, date: string, 
 
   const entry: WaitlistEntry = {
     id: `wl_${waitlistSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     customerId,
     courtId,
     date,
@@ -1528,8 +1883,8 @@ export function joinWaitlist(customerId: string, courtId: string, date: string, 
   return entry;
 }
 
-export function redeemLoyaltyReward(customerId: string, rewardId: string): LoyaltyRedemption {
-  const customer = customers.find((c) => c.id === customerId);
+export function redeemLoyaltyReward(organizationId: string, customerId: string, rewardId: string): LoyaltyRedemption {
+  const customer = customers.find((c) => c.id === customerId && c.organizationId === organizationId);
   if (!customer) throw new Error("Cliente no encontrado");
   const reward = loyaltyRewards.find((r) => r.id === rewardId);
   if (!reward) throw new Error("Beneficio no encontrado");
@@ -1538,7 +1893,7 @@ export function redeemLoyaltyReward(customerId: string, rewardId: string): Loyal
   customer.loyaltyPoints -= reward.pointsCost;
   const redemption: LoyaltyRedemption = {
     id: `redeem_${redemptionSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     customerId,
     rewardId,
     rewardLabel: reward.label,
@@ -1546,47 +1901,49 @@ export function redeemLoyaltyReward(customerId: string, rewardId: string): Loyal
     createdAt: new Date().toISOString(),
   };
   loyaltyRedemptions.push(redemption);
-  logAudit(getCurrentEmployee().id, "Canje de puntos", `${customer.name} canjeó "${reward.label}"`);
+  logAudit(organizationId, null, "Canje de puntos", `${customer.name} canjeó "${reward.label}"`);
   return redemption;
 }
 
-export function createPromotion(input: Omit<Promotion, "id" | "organizationId">): Promotion {
-  const promotion: Promotion = { id: `promo_${promotionSeq++}`, organizationId: ORG_ID, ...input };
+export function createPromotion(organizationId: string, actorEmployeeId: string, input: Omit<Promotion, "id" | "organizationId">): Promotion {
+  const promotion: Promotion = { id: `promo_${promotionSeq++}`, organizationId, ...input };
   promotions.push(promotion);
-  logAudit(getCurrentEmployee().id, "Promoción creada", `${promotion.label} (-${Math.round(promotion.discountPercentage * 100)}%)`);
+  logAudit(organizationId, actorEmployeeId, "Promoción creada", `${promotion.label} (-${Math.round(promotion.discountPercentage * 100)}%)`);
   return promotion;
 }
 
-export function setPromotionActive(promotionId: string, active: boolean): Promotion {
-  const promotion = promotions.find((p) => p.id === promotionId);
+export function setPromotionActive(organizationId: string, actorEmployeeId: string, promotionId: string, active: boolean): Promotion {
+  const promotion = promotions.find((p) => p.id === promotionId && p.organizationId === organizationId);
   if (!promotion) throw new Error("Promoción no encontrada");
   promotion.active = active;
-  logAudit(getCurrentEmployee().id, active ? "Promoción activada" : "Promoción desactivada", promotion.label);
+  logAudit(organizationId, actorEmployeeId, active ? "Promoción activada" : "Promoción desactivada", promotion.label);
   return promotion;
 }
 
 export function createTournament(
+  organizationId: string,
+  actorEmployeeId: string,
   input: Omit<Tournament, "id" | "organizationId" | "status" | "createdAt">
 ): Tournament {
   const tournament: Tournament = {
     id: `tourn_${tournamentSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     status: "inscripcion",
     createdAt: new Date().toISOString(),
     ...input,
   };
   tournaments.push(tournament);
-  logAudit(getCurrentEmployee().id, "Torneo creado", tournament.name);
+  logAudit(organizationId, actorEmployeeId, "Torneo creado", tournament.name);
   return tournament;
 }
 
-export function registerTeam(input: {
+export function registerTeam(organizationId: string, input: {
   tournamentId: string;
   name: string;
   playerNames: string[];
   customerId?: string;
 }): TournamentTeam {
-  const tournament = tournaments.find((t) => t.id === input.tournamentId);
+  const tournament = tournaments.find((t) => t.id === input.tournamentId && t.organizationId === organizationId);
   if (!tournament) throw new Error("Torneo no encontrado");
   if (tournament.status !== "inscripcion") throw new Error("La inscripción ya cerró");
 
@@ -1603,10 +1960,11 @@ export function registerTeam(input: {
     registeredAt: new Date().toISOString(),
   };
   tournamentTeams.push(team);
-  logAudit(getCurrentEmployee().id, "Equipo inscripto", `${team.name} en ${tournament.name}`);
+  logAudit(organizationId, null, "Equipo inscripto", `${team.name} en ${tournament.name}`);
 
   if (input.customerId) {
     notify(
+      organizationId,
       input.customerId,
       "torneo_inscripcion",
       `Inscribimos a "${team.name}" en ${tournament.name}. ¡Nos vemos el ${tournament.date}!`
@@ -1615,8 +1973,8 @@ export function registerTeam(input: {
   return team;
 }
 
-export function generateBracket(tournamentId: string): TournamentMatch[] {
-  const tournament = tournaments.find((t) => t.id === tournamentId);
+export function generateBracket(organizationId: string, actorEmployeeId: string, tournamentId: string): TournamentMatch[] {
+  const tournament = tournaments.find((t) => t.id === tournamentId && t.organizationId === organizationId);
   if (!tournament) throw new Error("Torneo no encontrado");
   const teams = tournamentTeams.filter((t) => t.tournamentId === tournamentId);
   if (teams.length < 2) throw new Error("Necesitás al menos 2 equipos para generar el cuadro");
@@ -1626,13 +1984,15 @@ export function generateBracket(tournamentId: string): TournamentMatch[] {
 
   const matches = generateBracketInternal(tournamentId);
   tournament.status = "en_curso";
-  logAudit(getCurrentEmployee().id, "Cuadro generado", `${tournament.name} — ${teams.length} equipos`);
+  logAudit(organizationId, actorEmployeeId, "Cuadro generado", `${tournament.name} — ${teams.length} equipos`);
   return matches;
 }
 
-export function recordMatchResult(matchId: string, winnerTeamId: string, scoreLabel?: string): TournamentMatch {
+export function recordMatchResult(organizationId: string, actorEmployeeId: string, matchId: string, winnerTeamId: string, scoreLabel?: string): TournamentMatch {
   const match = tournamentMatches.find((m) => m.id === matchId);
   if (!match) throw new Error("Partido no encontrado");
+  const tournament = tournaments.find((t) => t.id === match.tournamentId && t.organizationId === organizationId);
+  if (!tournament) throw new Error("Torneo no encontrado");
   if (!match.teamAId || !match.teamBId) throw new Error("Todavía faltan equipos para este partido");
   if (winnerTeamId !== match.teamAId && winnerTeamId !== match.teamBId) throw new Error("Equipo inválido");
 
@@ -1644,43 +2004,34 @@ export function recordMatchResult(matchId: string, winnerTeamId: string, scoreLa
   const hasNextRound = tournamentMatches.some(
     (m) => m.tournamentId === match.tournamentId && m.round === match.round + 1
   );
-  if (!hasNextRound) {
-    const tournament = tournaments.find((t) => t.id === match.tournamentId);
-    if (tournament) tournament.status = "finalizado";
-  }
+  if (!hasNextRound) tournament.status = "finalizado";
 
   const winner = tournamentTeams.find((t) => t.id === winnerTeamId);
-  logAudit(getCurrentEmployee().id, "Resultado cargado", `${winner?.name ?? winnerTeamId} ganó (ronda ${match.round})`);
+  logAudit(organizationId, actorEmployeeId, "Resultado cargado", `${winner?.name ?? winnerTeamId} ganó (ronda ${match.round})`);
   return match;
 }
 
 // ---------------------------------------------------------------------------
-// SaaS mutations: prueba gratis, cambio de plan, facturación
+// SaaS mutations: cambio de plan, facturación de la propia cuenta
+// (`createOrganization`, más arriba, es lo que reemplaza al viejo
+// `startTrial` para el registro real de una cuenta nueva).
 // ---------------------------------------------------------------------------
 
-const TRIAL_DAYS = 7;
-
-export function startTrial(planId: PlanId, billingEmail: string): Organization {
-  organization.plan = planId;
-  organization.subscriptionStatus = "trialing";
-  organization.billingEmail = billingEmail;
-  organization.trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  organization.currentPeriodEnd = undefined;
-  logAudit(getCurrentEmployee().id, "Prueba gratis iniciada", `Plan ${planId} · ${TRIAL_DAYS} días · ${billingEmail}`);
-  return organization;
-}
-
-export function changePlan(planId: PlanId): Organization {
+export function changePlan(organizationId: string, employeeId: string, planId: PlanId): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
   const previous = organization.plan;
   organization.plan = planId;
-  logAudit(getCurrentEmployee().id, "Plan cambiado", `${previous} → ${planId}`);
+  logAudit(organizationId, employeeId, "Plan cambiado", `${previous} → ${planId}`);
   return organization;
 }
 
 // Simula el checkout de Mercado Pago Suscripciones: siempre aprobado, como el
 // resto de los pagos de esta demo. Reemplazar por la preferencia/webhook real
 // de MP cuando haya credenciales.
-export function activateSubscription(billingEmail: string): Organization {
+export function activateSubscription(organizationId: string, employeeId: string, billingEmail: string): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
   const plan = getPlan(organization.plan);
   if (!plan) throw new Error("Plan inválido");
 
@@ -1692,7 +2043,7 @@ export function activateSubscription(billingEmail: string): Organization {
 
   billingInvoices.push({
     id: `inv_${billingInvoiceSeq++}`,
-    organizationId: ORG_ID,
+    organizationId,
     plan: plan.id,
     amountUSD: plan.priceUSD,
     status: "pagada",
@@ -1701,26 +2052,24 @@ export function activateSubscription(billingEmail: string): Organization {
     createdAt: new Date().toISOString(),
   });
 
-  logAudit(getCurrentEmployee().id, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
+  logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
   return organization;
 }
 
-export function cancelSubscription(): Organization {
+export function cancelSubscription(organizationId: string, employeeId: string): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
   organization.subscriptionStatus = "canceled";
-  logAudit(getCurrentEmployee().id, "Suscripción cancelada", `Plan ${organization.plan}`);
+  logAudit(organizationId, employeeId, "Suscripción cancelada", `Plan ${organization.plan}`);
   return organization;
 }
 
 // Solo para poder mostrar en la demo cómo se ve el paywall sin esperar 7 días reales.
-export function simulateTrialExpired(): Organization {
+export function simulateTrialExpired(organizationId: string): Organization {
+  const organization = getOrganizationById(organizationId);
+  if (!organization) throw new Error("Organización no encontrada");
   if (organization.subscriptionStatus === "trialing") {
     organization.trialEndsAt = addDaysISO(todayISO(), -1);
   }
   return organization;
-}
-
-// The mock session: everything in this MVP acts as this logged-in customer
-// until real Supabase Auth replaces it.
-export function getCurrentCustomer(): Customer {
-  return customers[0];
 }

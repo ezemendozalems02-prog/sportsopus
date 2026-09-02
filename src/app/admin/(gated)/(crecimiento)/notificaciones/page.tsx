@@ -1,4 +1,5 @@
 import { getCustomer, listNotifications } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { Card } from "@/components/ui";
 
 const KIND_LABELS: Record<string, string> = {
@@ -9,8 +10,9 @@ const KIND_LABELS: Record<string, string> = {
   torneo_inscripcion: "Inscripción a torneo",
 };
 
-export default function NotificacionesPage() {
-  const notifications = listNotifications();
+export default async function NotificacionesPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const notifications = listNotifications(organizationId);
 
   return (
     <div>
@@ -22,7 +24,7 @@ export default function NotificacionesPage() {
 
       <div className="mt-6 flex flex-col gap-2">
         {notifications.map((n) => {
-          const customer = getCustomer(n.customerId);
+          const customer = getCustomer(organizationId, n.customerId);
           return (
             <Card key={n.id} className="flex items-start justify-between gap-3">
               <div>

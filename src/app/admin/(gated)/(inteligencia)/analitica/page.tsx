@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import {
   computeCourtRevenueRanking,
   computeDailyRevenue,
@@ -10,20 +11,22 @@ import {
   computeRevenueByCategory,
   computeWeekdayStats,
 } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, PAYMENT_METHOD_LABELS, SPORT_LABELS } from "@/lib/format";
-import { formatDateShort } from "@/lib/time";
-import { BarChart, Card, OccupancyBar, StatTile } from "@/components/ui";
+import { Card, OccupancyBar, StatTile } from "@/components/ui";
+import { PaymentMethodPieChart, RevenueTrendChart } from "@/components/charts";
 
-export default function AnaliticaPage() {
-  const daily = computeDailyRevenue(14);
-  const courtRanking = computeCourtRevenueRanking();
-  const hourBands = computeHourBandStats();
-  const weekdays = computeWeekdayStats();
-  const paymentMethods = computePaymentMethodTotals();
-  const category = computeRevenueByCategory();
-  const pnl = computeProfitAndLoss();
-  const lowDemand = computeLowDemandRecommendations(3);
-  const highDemand = computeHighDemandBand();
+export default async function AnaliticaPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const daily = computeDailyRevenue(organizationId, 14);
+  const courtRanking = computeCourtRevenueRanking(organizationId);
+  const hourBands = computeHourBandStats(organizationId);
+  const weekdays = computeWeekdayStats(organizationId);
+  const paymentMethods = computePaymentMethodTotals(organizationId);
+  const category = computeRevenueByCategory(organizationId);
+  const pnl = computeProfitAndLoss(organizationId);
+  const lowDemand = computeLowDemandRecommendations(organizationId, 3);
+  const highDemand = computeHighDemandBand(organizationId);
 
   const topCourt = courtRanking[0];
   const bestWeekday = [...weekdays].sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
@@ -36,21 +39,21 @@ export default function AnaliticaPage() {
       </p>
 
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="Ingresos totales" value={formatCurrency(pnl.ingresos)} />
-        <StatTile label="Gastos totales" value={formatCurrency(pnl.gastos)} />
+        <StatTile label="Ingresos totales" value={formatCurrency(pnl.ingresos)} icon={TrendingUp} />
+        <StatTile label="Gastos totales" value={formatCurrency(pnl.gastos)} icon={TrendingDown} />
         <StatTile label="Resultado" value={formatCurrency(pnl.resultado)} sub={`${Math.round(pnl.margin * 100)}% margen`} />
         <StatTile label="Cancha top" value={topCourt?.court.name ?? "—"} sub={topCourt ? formatCurrency(topCourt.revenue) : undefined} />
       </div>
 
       <Card className="mt-6">
         <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Facturación últimos 14 días</h2>
-        <div className="mt-4">
-          <BarChart
-            data={daily.map((d) => ({ label: d.date, value: d.total }))}
-            formatValue={formatCurrency}
-            formatLabel={formatDateShort}
-          />
-        </div>
+        {daily.some((d) => d.total > 0) ? (
+          <div className="mt-2">
+            <RevenueTrendChart data={daily} />
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-zinc-400">Todavía no hay facturación para graficar.</p>
+        )}
       </Card>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -74,6 +77,7 @@ export default function AnaliticaPage() {
                 </div>
               );
             })}
+            {courtRanking.length === 0 && <p className="text-sm text-zinc-400">Todavía no hay canchas cargadas.</p>}
           </div>
         </Card>
 
@@ -122,14 +126,21 @@ export default function AnaliticaPage() {
 
         <Card>
           <h2 className="font-medium text-zinc-900 dark:text-zinc-50">Métodos de pago</h2>
-          <div className="mt-4 flex flex-col gap-2 text-sm">
-            {paymentMethods.map((m) => (
-              <div key={m.method} className="flex justify-between">
-                <span className="text-zinc-600 dark:text-zinc-400">{PAYMENT_METHOD_LABELS[m.method]}</span>
-                <span className="font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(m.amount)}</span>
+          {paymentMethods.length > 0 ? (
+            <>
+              <PaymentMethodPieChart data={paymentMethods} />
+              <div className="mt-2 flex flex-col gap-1.5 text-sm">
+                {paymentMethods.map((m) => (
+                  <div key={m.method} className="flex justify-between">
+                    <span className="text-zinc-600 dark:text-zinc-400">{PAYMENT_METHOD_LABELS[m.method]}</span>
+                    <span className="font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(m.amount)}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-zinc-400">Todavía no hay pagos registrados.</p>
+          )}
         </Card>
       </div>
 

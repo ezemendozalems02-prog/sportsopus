@@ -1,8 +1,10 @@
 import { listAuditLog } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { Card } from "@/components/ui";
 
-export default function AuditoriaPage() {
-  const entries = listAuditLog();
+export default async function AuditoriaPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const entries = listAuditLog(organizationId);
 
   return (
     <div>

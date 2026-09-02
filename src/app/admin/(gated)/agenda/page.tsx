@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCourt, getCustomer, listBookingsForDate } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 import { addDaysISO, formatDateLong, todayISO } from "@/lib/time";
 import { Card, StatusBadge } from "@/components/ui";
@@ -10,9 +11,10 @@ export default async function AgendaPage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
+  const { organizationId } = await requireEmployeeSession();
   const { date: dateParam } = await searchParams;
   const date = dateParam ?? todayISO();
-  const bookings = listBookingsForDate(date).sort((a, b) => (a.startTime > b.startTime ? 1 : -1));
+  const bookings = listBookingsForDate(organizationId, date).sort((a, b) => (a.startTime > b.startTime ? 1 : -1));
 
   return (
     <div>
@@ -45,8 +47,8 @@ export default async function AgendaPage({
 
       <div className="mt-6 flex flex-col gap-3">
         {bookings.map((booking) => {
-          const court = getCourt(booking.courtId);
-          const customer = getCustomer(booking.customerId);
+          const court = getCourt(organizationId, booking.courtId);
+          const customer = getCustomer(organizationId, booking.customerId);
           return (
             <Card key={booking.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">

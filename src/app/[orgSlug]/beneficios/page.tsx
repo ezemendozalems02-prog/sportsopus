@@ -1,11 +1,40 @@
-import { getCurrentCustomer, listLoyaltyRedemptions, listLoyaltyRewards } from "@/lib/db";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { getCustomer, getOrganizationBySlug, listLoyaltyRedemptions, listLoyaltyRewards } from "@/lib/db";
+import { getCustomerSession } from "@/lib/session";
 import { Card } from "@/components/ui";
 import { RedeemButton } from "./redeem-button";
 
-export default function BeneficiosPage() {
-  const customer = getCurrentCustomer();
+export default async function BeneficiosPage({ params }: { params: Promise<{ orgSlug: string }> }) {
+  const { orgSlug } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const session = await getCustomerSession(org.id);
   const rewards = listLoyaltyRewards();
-  const redemptions = listLoyaltyRedemptions(customer.id);
+
+  if (!session) {
+    return (
+      <div>
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Sport Points</h1>
+        <Card className="mt-6 text-center">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Reservá tu primer turno para empezar a sumar puntos y canjear beneficios.
+          </p>
+          <Link
+            href={`/${orgSlug}/reservar`}
+            className="mt-4 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Reservar ahora
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  const customer = getCustomer(org.id, session.customerId);
+  if (!customer) notFound();
+  const redemptions = listLoyaltyRedemptions(org.id, customer.id);
 
   return (
     <div>
@@ -24,7 +53,7 @@ export default function BeneficiosPage() {
               <p className="font-medium text-zinc-900 dark:text-zinc-50">{reward.label}</p>
               <p className="text-xs text-zinc-400">{reward.pointsCost} puntos</p>
             </div>
-            <RedeemButton rewardId={reward.id} canAfford={customer.loyaltyPoints >= reward.pointsCost} />
+            <RedeemButton organizationId={org.id} rewardId={reward.id} canAfford={customer.loyaltyPoints >= reward.pointsCost} />
           </Card>
         ))}
       </div>

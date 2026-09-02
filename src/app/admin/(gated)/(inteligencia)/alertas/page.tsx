@@ -6,6 +6,7 @@ import {
   listCashSessions,
   listLowStockProducts,
 } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 import { todayISO } from "@/lib/time";
 import { Card } from "@/components/ui";
@@ -28,17 +29,18 @@ function alertCard(key: string, emoji: string, text: React.ReactNode, href?: str
   );
 }
 
-export default function AlertasPage() {
+export default async function AlertasPage() {
+  const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const todayBookings = listBookingsForDate(today);
+  const todayBookings = listBookingsForDate(organizationId, today);
   const pending = todayBookings.filter((b) => b.status === "pendiente_pago");
-  const lowStock = listLowStockProducts();
-  const lowDemand = computeLowDemandRecommendations(3);
+  const lowStock = listLowStockProducts(organizationId);
+  const lowDemand = computeLowDemandRecommendations(organizationId, 3);
 
-  const cashDiscrepancies = listCashSessions()
+  const cashDiscrepancies = listCashSessions(organizationId)
     .filter((s) => s.status === "cerrada" && s.closingCountedAmount !== undefined)
     .map((session) => {
-      const movements = listCashMovements(session.id);
+      const movements = listCashMovements(organizationId, session.id);
       const expected = session.openingAmount + movements.filter((m) => m.method === "efectivo").reduce((sum, m) => sum + m.amount, 0);
       const diff = (session.closingCountedAmount ?? 0) - expected;
       return { session, diff };

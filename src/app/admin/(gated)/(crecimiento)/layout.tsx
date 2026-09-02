@@ -1,7 +1,9 @@
 import { hasFeatureAccess } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { PlanUpsell } from "@/components/paywall";
 
-export default function CrecimientoLayout({ children }: { children: React.ReactNode }) {
-  if (!hasFeatureAccess("crecimiento")) return <PlanUpsell group="crecimiento" />;
+export default async function CrecimientoLayout({ children }: { children: React.ReactNode }) {
+  const { organizationId } = await requireEmployeeSession();
+  if (!hasFeatureAccess(organizationId, "crecimiento")) return <PlanUpsell group="crecimiento" />;
   return <>{children}</>;
 }

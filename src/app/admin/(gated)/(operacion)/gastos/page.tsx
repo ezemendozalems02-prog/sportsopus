@@ -1,12 +1,14 @@
 import { listExpensesForMonth } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { EXPENSE_CATEGORY_LABELS, formatCurrency } from "@/lib/format";
 import { todayISO } from "@/lib/time";
 import { Card, StatTile } from "@/components/ui";
 import { AddExpenseForm } from "./add-expense-form";
 
-export default function GastosPage() {
+export default async function GastosPage() {
+  const { organizationId } = await requireEmployeeSession();
   const currentMonth = todayISO().slice(0, 7);
-  const expenses = listExpensesForMonth(currentMonth);
+  const expenses = listExpensesForMonth(organizationId, currentMonth);
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   const byCategory = expenses.reduce<Record<string, number>>((acc, e) => {

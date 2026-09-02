@@ -1,8 +1,9 @@
 import { getCourt, listBookingsForCustomer, listCustomers } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 
-function customerStats(customerId: string) {
-  const bookings = listBookingsForCustomer(customerId);
+function customerStats(organizationId: string, customerId: string) {
+  const bookings = listBookingsForCustomer(organizationId, customerId);
   const spent = bookings.reduce(
     (sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0),
     0
@@ -18,8 +19,9 @@ function customerStats(customerId: string) {
   return { total: bookings.length, spent, cancellations, noShows, lastBooking, favoriteCourtId };
 }
 
-export default function ClientesPage() {
-  const customers = listCustomers();
+export default async function ClientesPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const customers = listCustomers(organizationId);
 
   return (
     <div>
@@ -42,8 +44,8 @@ export default function ClientesPage() {
           </thead>
           <tbody>
             {customers.map((customer) => {
-              const stats = customerStats(customer.id);
-              const favoriteCourt = stats.favoriteCourtId ? getCourt(stats.favoriteCourtId) : undefined;
+              const stats = customerStats(organizationId, customer.id);
+              const favoriteCourt = stats.favoriteCourtId ? getCourt(organizationId, stats.favoriteCourtId) : undefined;
               return (
                 <tr key={customer.id}>
                   <td className="rounded-l-xl bg-white px-3 py-3 dark:bg-zinc-900">
@@ -62,6 +64,13 @@ export default function ClientesPage() {
                 </tr>
               );
             })}
+            {customers.length === 0 && (
+              <tr>
+                <td colSpan={8} className="rounded-xl bg-white px-3 py-6 text-center text-zinc-400 dark:bg-zinc-900">
+                  Todavía no tenés clientes — van a aparecer acá apenas alguien reserve.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

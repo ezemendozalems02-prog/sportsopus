@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getTournament, listMatchesForTournament, listTeamsForTournament } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card, StatTile } from "@/components/ui";
@@ -10,8 +11,9 @@ import { GenerateBracketButton } from "./generate-bracket-button";
 import { MatchResultForm } from "./match-result-form";
 
 export default async function AdminTorneoDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { organizationId } = await requireEmployeeSession();
   const { id } = await params;
-  const tournament = getTournament(id);
+  const tournament = getTournament(organizationId, id);
   if (!tournament) notFound();
 
   const teams = listTeamsForTournament(id);
@@ -37,7 +39,7 @@ export default async function AdminTorneoDetailPage({ params }: { params: Promis
 
       {tournament.status === "inscripcion" && (
         <div className="mt-6 flex flex-col gap-4">
-          <RegisterTeamForm tournamentId={tournament.id} />
+          <RegisterTeamForm organizationId={organizationId} tournamentId={tournament.id} />
           {teams.length >= 2 && <GenerateBracketButton tournamentId={tournament.id} />}
         </div>
       )}

@@ -1,10 +1,12 @@
 import { computeRanking } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { Card } from "@/components/ui";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
-export default function RankingPage() {
-  const ranking = computeRanking();
+export default async function RankingPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const ranking = computeRanking(organizationId);
 
   return (
     <div>

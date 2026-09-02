@@ -1,11 +1,13 @@
 import { listLowStockProducts, listProductCategories, listProducts } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 import { RestockButton } from "./restock-button";
 
-export default function InventarioPage() {
-  const categories = listProductCategories();
-  const products = listProducts();
-  const lowStock = listLowStockProducts();
+export default async function InventarioPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const categories = listProductCategories(organizationId);
+  const products = listProducts(organizationId);
+  const lowStock = listLowStockProducts(organizationId);
 
   return (
     <div>

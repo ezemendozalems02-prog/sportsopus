@@ -4,10 +4,13 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { registerTeamAction } from "@/lib/actions";
 
-export function RegisterTeamForm({ tournamentId, sport }: { tournamentId: string; sport: string }) {
+export function RegisterTeamForm({ organizationId, tournamentId, sport }: { organizationId: string; tournamentId: string; sport: string }) {
   const router = useRouter();
   const [teamName, setTeamName] = useState("");
-  const [players, setPlayers] = useState(sport === "padel" ? "" : "");
+  const [players, setPlayers] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -17,12 +20,18 @@ export function RegisterTeamForm({ tournamentId, sport }: { tournamentId: string
       .split(",")
       .map((p) => p.trim())
       .filter(Boolean);
-    if (!teamName || playerNames.length === 0) return;
+    if (!teamName || playerNames.length === 0 || !name || !email) return;
 
     setError(null);
     startTransition(async () => {
       try {
-        await registerTeamAction({ tournamentId, name: teamName, playerNames, asCurrentCustomer: true });
+        await registerTeamAction({
+          organizationId,
+          tournamentId,
+          name: teamName,
+          playerNames,
+          contact: { name, email, phone },
+        });
         setDone(true);
         router.refresh();
       } catch (e) {
@@ -62,10 +71,37 @@ export function RegisterTeamForm({ tournamentId, sport }: { tournamentId: string
           className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
         />
       </label>
+      <label className="mt-3 block text-sm text-zinc-600 dark:text-zinc-400">
+        Tu nombre (contacto)
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
+      <label className="mt-3 block text-sm text-zinc-600 dark:text-zinc-400">
+        Email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
+      <label className="mt-3 block text-sm text-zinc-600 dark:text-zinc-400">
+        Teléfono
+        <input
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
       {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
       <button
         onClick={handleSubmit}
-        disabled={pending}
+        disabled={pending || !teamName || !name || !email}
         className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
       >
         {pending ? "Inscribiendo..." : "Confirmar inscripción"}

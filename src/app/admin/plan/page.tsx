@@ -1,4 +1,5 @@
-import { computeAccessState, getOrganization, getPlan, listBillingInvoices, listPlans, priceInArs } from "@/lib/db";
+import { computeAccessState, getOrganizationById, getPlan, listBillingInvoices, listPlans, priceInArs } from "@/lib/db";
+import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, formatUsd, SUBSCRIPTION_STATUS_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card } from "@/components/ui";
@@ -13,12 +14,14 @@ const STATUS_COLORS: Record<string, string> = {
   red: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
 };
 
-export default function PlanPage() {
-  const org = getOrganization();
+export default async function PlanPage() {
+  const { organizationId } = await requireEmployeeSession();
+  const org = getOrganizationById(organizationId);
+  if (!org) return null;
   const plans = listPlans();
   const currentPlan = getPlan(org.plan);
-  const access = computeAccessState();
-  const invoices = listBillingInvoices();
+  const access = computeAccessState(organizationId);
+  const invoices = listBillingInvoices(organizationId);
   const statusMeta = SUBSCRIPTION_STATUS_LABELS[org.subscriptionStatus];
 
   return (

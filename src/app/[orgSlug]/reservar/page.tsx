@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getCourt, getSlotsForCourt, listCourts } from "@/lib/db";
+import { notFound } from "next/navigation";
+import { getCourt, getOrganizationBySlug, getSlotsForCourt, listCourts } from "@/lib/db";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { addDaysISO, dayOfWeek, formatDateLong, todayISO } from "@/lib/time";
 import { Card } from "@/components/ui";
@@ -21,14 +22,21 @@ function buildQuery(params: Record<string, string | undefined>) {
 }
 
 export default async function ReservarPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ orgSlug: string }>;
   searchParams: Promise<{ sport?: string; courtId?: string; date?: string }>;
 }) {
-  const params = await searchParams;
-  const sport = params.sport as Sport | undefined;
-  const courtId = params.courtId;
-  const date = params.date ?? todayISO();
+  const { orgSlug } = await params;
+  const org = getOrganizationBySlug(orgSlug);
+  if (!org) notFound();
+
+  const base = `/${orgSlug}/reservar`;
+  const sportParams = await searchParams;
+  const sport = sportParams.sport as Sport | undefined;
+  const courtId = sportParams.courtId;
+  const date = sportParams.date ?? todayISO();
 
   if (!sport) {
     return (
@@ -38,7 +46,7 @@ export default async function ReservarPage({
           {SPORTS.map((s) => (
             <Link
               key={s.value}
-              href={`/reservar?${buildQuery({ sport: s.value })}`}
+              href={`${base}?${buildQuery({ sport: s.value })}`}
               className="flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-white py-8 transition hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900"
             >
               <span className="text-3xl">{s.emoji}</span>
@@ -51,10 +59,10 @@ export default async function ReservarPage({
   }
 
   if (!courtId) {
-    const courts = listCourts().filter((c) => c.sport === sport && c.active);
+    const courts = listCourts(org.id).filter((c) => c.sport === sport && c.active);
     return (
       <div>
-        <Link href="/reservar" className="text-sm text-zinc-500 dark:text-zinc-400">
+        <Link href={base} className="text-sm text-zinc-500 dark:text-zinc-400">
           ← Cambiar deporte
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -66,7 +74,7 @@ export default async function ReservarPage({
             return (
               <Link
                 key={court.id}
-                href={`/reservar?${buildQuery({ sport, courtId: court.id })}`}
+                href={`${base}?${buildQuery({ sport, courtId: court.id })}`}
                 className="rounded-2xl border border-zinc-200 bg-white p-4 transition hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <p className="font-medium text-zinc-900 dark:text-zinc-50">{court.name}</p>
@@ -79,22 +87,27 @@ export default async function ReservarPage({
               </Link>
             );
           })}
+          {courts.length === 0 && (
+            <Card>
+              <p className="text-sm text-zinc-400">Todavía no hay canchas de este deporte cargadas.</p>
+            </Card>
+          )}
         </div>
       </div>
     );
   }
 
-  const court = getCourt(courtId);
+  const court = getCourt(org.id, courtId);
   if (!court) {
     return <p className="text-sm text-red-600">Cancha no encontrada.</p>;
   }
 
   const days = Array.from({ length: 7 }, (_, i) => addDaysISO(todayISO(), i));
-  const slots = getSlotsForCourt(courtId, date);
+  const slots = getSlotsForCourt(org.id, courtId, date);
 
   return (
     <div>
-      <Link href={`/reservar?${buildQuery({ sport })}`} className="text-sm text-zinc-500 dark:text-zinc-400">
+      <Link href={`${base}?${buildQuery({ sport })}`} className="text-sm text-zinc-500 dark:text-zinc-400">
         ← Cambiar cancha
       </Link>
       <h1 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-zinc-50">{court.name}</h1>
@@ -107,7 +120,7 @@ export default async function ReservarPage({
           return (
             <Link
               key={d}
-              href={`/reservar?${buildQuery({ sport, courtId, date: d })}`}
+              href={`${base}?${buildQuery({ sport, courtId, date: d })}`}
               className={`flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded-xl text-sm font-medium ${
                 active
                   ? "bg-emerald-600 text-white"
@@ -131,7 +144,7 @@ export default async function ReservarPage({
             slot.available ? (
               <Link
                 key={slot.startTime}
-                href={`/reservar/confirmar?${buildQuery({ courtId, date, startTime: slot.startTime })}`}
+                href={`/${orgSlug}/reservar/confirmar?${buildQuery({ courtId, date, startTime: slot.startTime })}`}
                 className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-center transition hover:border-emerald-500 dark:border-emerald-800 dark:bg-emerald-950/40"
               >
                 <p className="font-medium text-emerald-700 dark:text-emerald-300">{slot.startTime}</p>
@@ -148,7 +161,7 @@ export default async function ReservarPage({
               >
                 <p className="font-medium text-zinc-400 dark:text-zinc-500">{slot.startTime}</p>
                 <p className="text-xs text-zinc-400">Ocupado</p>
-                <WaitlistButton courtId={courtId} date={date} startTime={slot.startTime} />
+                <WaitlistButton organizationId={org.id} courtId={courtId} date={date} startTime={slot.startTime} />
               </div>
             )
           )}
