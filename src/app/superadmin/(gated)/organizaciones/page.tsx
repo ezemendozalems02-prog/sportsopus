@@ -23,12 +23,13 @@ export default async function OrganizacionesPage() {
               <th className="px-3">Dueño</th>
               <th className="px-3">Empleados</th>
               <th className="px-3">Canchas</th>
+              <th className="px-3">Clientes</th>
               <th className="px-3">Reservas</th>
               <th className="px-3">Trial vence</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ organization, ownerEmail, employeeCount, courtCount, bookingCount }) => {
+            {rows.map(({ organization, ownerEmail, employeeCount, courtCount, bookingCount, customerCount, activeCustomerCount }) => {
               const statusMeta = SUBSCRIPTION_STATUS_LABELS[organization.subscriptionStatus];
               return (
                 <tr key={organization.id}>
@@ -43,6 +44,7 @@ export default async function OrganizacionesPage() {
                   <td className="bg-zinc-900 px-3 py-3 text-zinc-400">{ownerEmail}</td>
                   <td className="bg-zinc-900 px-3 py-3 text-zinc-300">{employeeCount}</td>
                   <td className="bg-zinc-900 px-3 py-3 text-zinc-300">{courtCount}</td>
+                  <td className="bg-zinc-900 px-3 py-3 text-zinc-300">{customerCount} <span className="text-zinc-500">({activeCustomerCount} activos)</span></td>
                   <td className="bg-zinc-900 px-3 py-3 text-zinc-300">{bookingCount}</td>
                   <td className="rounded-r-xl bg-zinc-900 px-3 py-3 text-zinc-400">
                     {organization.trialEndsAt ? formatDateLong(organization.trialEndsAt) : "—"}
@@ -52,7 +54,7 @@ export default async function OrganizacionesPage() {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="rounded-xl bg-zinc-900 px-3 py-6 text-center text-zinc-500">
+                <td colSpan={9} className="rounded-xl bg-zinc-900 px-3 py-6 text-center text-zinc-500">
                   Todavía no se registró ninguna organización.
                 </td>
               </tr>

@@ -28,6 +28,11 @@ export default async function SuperadminDashboardPage() {
         <StatCard label="Prueba vence en ≤3 días" value={String(stats.trialsEndingSoon)} />
       </div>
 
+      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Clientes activos (30d)" value={String(stats.activeCustomers)} />
+        <StatCard label="Clientes totales" value={String(stats.totalCustomers)} />
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="font-medium text-zinc-50">Estado de suscripciones</h2>

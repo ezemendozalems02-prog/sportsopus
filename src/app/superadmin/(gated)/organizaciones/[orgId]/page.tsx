@@ -5,6 +5,7 @@ import {
   listBillingInvoices,
   listBookings,
   listCourts,
+  listCustomers,
   listEmployees,
   listPlans,
 } from "@/lib/db";
@@ -17,11 +18,12 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
   const organization = await getOrganizationById(orgId);
   if (!organization) notFound();
 
-  const [employees, courts, bookings, invoices] = await Promise.all([
+  const [employees, courts, bookings, invoices, customers] = await Promise.all([
     listEmployees(orgId),
     listCourts(orgId),
     listBookings(orgId),
     listBillingInvoices(orgId),
+    listCustomers(orgId),
   ]);
   const plans = listPlans();
   const statusMeta = SUBSCRIPTION_STATUS_LABELS[organization.subscriptionStatus];
@@ -45,7 +47,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
         currentStatus={organization.subscriptionStatus}
       />
 
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <p className="text-sm text-zinc-400">Empleados</p>
           <p className="mt-1 text-2xl font-semibold text-zinc-50">{employees.length}</p>
@@ -59,6 +61,10 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
           <p className="mt-1 text-2xl font-semibold text-zinc-50">{bookings.length}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <p className="text-sm text-zinc-400">Clientes</p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-50">{customers.length}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <p className="text-sm text-zinc-400">Trial vence</p>
           <p className="mt-1 text-lg font-semibold text-zinc-50">
             {organization.trialEndsAt ? formatDateLong(organization.trialEndsAt) : "—"}
@@ -66,7 +72,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="font-medium text-zinc-50">Empleados</h2>
           <div className="mt-3 flex flex-col gap-1.5 text-sm">
@@ -77,6 +83,19 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
               </div>
             ))}
             {employees.length === 0 && <p className="text-zinc-500">Sin empleados.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <h2 className="font-medium text-zinc-50">Clientes ({customers.length})</h2>
+          <div className="mt-3 flex max-h-72 flex-col gap-1.5 overflow-y-auto text-sm">
+            {customers.map((c) => (
+              <div key={c.id} className="flex justify-between gap-2">
+                <span className="truncate text-zinc-300">{c.name}</span>
+                <span className="shrink-0 text-zinc-500">{c.email}</span>
+              </div>
+            ))}
+            {customers.length === 0 && <p className="text-zinc-500">Sin clientes todavía.</p>}
           </div>
         </div>
 

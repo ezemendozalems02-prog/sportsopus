@@ -98,7 +98,8 @@ const platformAdmin: PlatformAdmin = {
 };
 
 export function verifyPlatformAdminCredentials(email: string, password: string): PlatformAdmin | undefined {
-  return platformAdmin.email.toLowerCase() === email.trim().toLowerCase() && platformAdmin.password === password
+  return platformAdmin.email.trim().toLowerCase() === email.trim().toLowerCase() &&
+    platformAdmin.password.trim() === password.trim()
     ? platformAdmin
     : undefined;
 }
@@ -339,24 +340,32 @@ export interface OrgSummary {
   employeeCount: number;
   courtCount: number;
   bookingCount: number;
+  customerCount: number;
+  activeCustomerCount: number;
 }
 
 export async function listOrgSummaries(): Promise<OrgSummary[]> {
   const organizations = await listOrganizations();
+  const activeSinceISO = addDaysISO(todayISO(), -30);
   return Promise.all(
     organizations.map(async (organization) => {
-      const [{ data: owner }, { count: employeeCount }, { count: courtCount }, { count: bookingCount }] = await Promise.all([
+      const [{ data: owner }, { count: employeeCount }, { count: courtCount }, { count: bookingCount }, { count: customerCount }, { data: recentBookings }] = await Promise.all([
         db().from("employees").select("email").eq("organization_id", organization.id).eq("role", "owner").maybeSingle(),
         db().from("employees").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
         db().from("courts").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
         db().from("bookings").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
+        db().from("customers").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
+        db().from("bookings").select("customer_id").eq("organization_id", organization.id).neq("status", "cancelada").gte("date", activeSinceISO),
       ]);
+      const activeCustomerCount = new Set((recentBookings ?? []).map((b) => b.customer_id)).size;
       return {
         organization,
         ownerEmail: owner?.email ?? organization.billingEmail ?? "—",
         employeeCount: employeeCount ?? 0,
         courtCount: courtCount ?? 0,
         bookingCount: bookingCount ?? 0,
+        customerCount: customerCount ?? 0,
+        activeCustomerCount,
       };
     })
   );
@@ -371,6 +380,8 @@ export interface PlatformStats {
   trialsEndingSoon: number;
   mrrUSD: number;
   planDistribution: { planId: PlanId; count: number }[];
+  totalCustomers: number;
+  activeCustomers: number;
 }
 
 export async function getPlatformStats(): Promise<PlatformStats> {
@@ -388,6 +399,9 @@ export async function getPlatformStats(): Promise<PlatformStats> {
     planId: p.id,
     count: organizations.filter((o) => o.plan === p.id).length,
   }));
+  const orgSummaries = await listOrgSummaries();
+  const totalCustomers = orgSummaries.reduce((sum, o) => sum + o.customerCount, 0);
+  const activeCustomers = orgSummaries.reduce((sum, o) => sum + o.activeCustomerCount, 0);
 
   return {
     totalOrgs: organizations.length,
@@ -398,6 +412,8 @@ export async function getPlatformStats(): Promise<PlatformStats> {
     trialsEndingSoon,
     mrrUSD,
     planDistribution,
+    totalCustomers,
+    activeCustomers,
   };
 }
 
