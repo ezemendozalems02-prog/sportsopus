@@ -14,13 +14,15 @@ import { OrgControls } from "./controls";
 
 export default async function OrgDetailPage({ params }: { params: Promise<{ orgId: string }> }) {
   const { orgId } = await params;
-  const organization = getOrganizationById(orgId);
+  const organization = await getOrganizationById(orgId);
   if (!organization) notFound();
 
-  const employees = listEmployees(orgId);
-  const courts = listCourts(orgId);
-  const bookings = listBookings(orgId);
-  const invoices = listBillingInvoices(orgId);
+  const [employees, courts, bookings, invoices] = await Promise.all([
+    listEmployees(orgId),
+    listCourts(orgId),
+    listBookings(orgId),
+    listBillingInvoices(orgId),
+  ]);
   const plans = listPlans();
   const statusMeta = SUBSCRIPTION_STATUS_LABELS[organization.subscriptionStatus];
 

@@ -29,7 +29,7 @@ export default async function ReservarPage({
   searchParams: Promise<{ sport?: string; courtId?: string; date?: string }>;
 }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
   const base = `/${orgSlug}/reservar`;
@@ -59,7 +59,8 @@ export default async function ReservarPage({
   }
 
   if (!courtId) {
-    const courts = listCourts(org.id).filter((c) => c.sport === sport && c.active);
+    const allCourts = await listCourts(org.id);
+    const courts = allCourts.filter((c) => c.sport === sport && c.active);
     return (
       <div>
         <Link href={base} className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -97,13 +98,13 @@ export default async function ReservarPage({
     );
   }
 
-  const court = getCourt(org.id, courtId);
+  const court = await getCourt(org.id, courtId);
   if (!court) {
     return <p className="text-sm text-red-600">Cancha no encontrada.</p>;
   }
 
   const days = Array.from({ length: 7 }, (_, i) => addDaysISO(todayISO(), i));
-  const slots = getSlotsForCourt(org.id, courtId, date);
+  const slots = await getSlotsForCourt(org.id, courtId, date);
 
   return (
     <div>

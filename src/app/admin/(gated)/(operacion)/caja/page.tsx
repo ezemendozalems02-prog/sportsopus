@@ -22,9 +22,9 @@ const MOVEMENT_LABELS: Record<string, string> = {
 
 export default async function CajaPage() {
   const { organizationId } = await requireEmployeeSession();
-  const session = getOpenCashSession(organizationId);
-  const products = listProducts(organizationId);
-  const categories = listProductCategories(organizationId);
+  const session = await getOpenCashSession(organizationId);
+  const products = await listProducts(organizationId);
+  const categories = await listProductCategories(organizationId);
 
   if (!session) {
     return (
@@ -37,8 +37,9 @@ export default async function CajaPage() {
     );
   }
 
-  const employee = listEmployees(organizationId).find((e) => e.id === session.employeeId);
-  const movements = listCashMovements(organizationId, session.id);
+  const employees = await listEmployees(organizationId);
+  const employee = employees.find((e) => e.id === session.employeeId);
+  const movements = await listCashMovements(organizationId, session.id);
   const cashMovements = movements.filter((m) => m.method === "efectivo");
   const expectedCash = session.openingAmount + cashMovements.reduce((sum, m) => sum + m.amount, 0);
   const totalsByMethod = movements.reduce<Record<string, number>>((acc, m) => {

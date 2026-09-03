@@ -16,12 +16,12 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default async function PlanPage() {
   const { organizationId } = await requireEmployeeSession();
-  const org = getOrganizationById(organizationId);
+  const org = await getOrganizationById(organizationId);
   if (!org) return null;
   const plans = listPlans();
   const currentPlan = getPlan(org.plan);
-  const access = computeAccessState(organizationId);
-  const invoices = listBillingInvoices(organizationId);
+  const access = await computeAccessState(organizationId);
+  const invoices = await listBillingInvoices(organizationId);
   const statusMeta = SUBSCRIPTION_STATUS_LABELS[org.subscriptionStatus];
 
   return (

@@ -8,7 +8,15 @@ import { NewCourtForm } from "./new-court-form";
 export default async function CanchasPage() {
   const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const courts = listCourts(organizationId);
+  const courts = await listCourts(organizationId);
+  const courtsWithOccupancy = await Promise.all(
+    courts.map(async (court) => {
+      const slotsToday = await getSlotsForCourt(organizationId, court.id, today);
+      const occupied = slotsToday.filter((s) => !s.available).length;
+      const occupancy = slotsToday.length ? Math.round((occupied / slotsToday.length) * 100) : 0;
+      return { court, occupancy };
+    })
+  );
 
   return (
     <div>
@@ -24,11 +32,7 @@ export default async function CanchasPage() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {courts.map((court) => {
-          const slotsToday = getSlotsForCourt(organizationId, court.id, today);
-          const occupied = slotsToday.filter((s) => !s.available).length;
-          const occupancy = slotsToday.length ? Math.round((occupied / slotsToday.length) * 100) : 0;
-
+        {courtsWithOccupancy.map(({ court, occupancy }) => {
           return (
             <Card key={court.id}>
               <div className="flex items-start justify-between">

@@ -4,7 +4,7 @@ import { Card } from "@/components/ui";
 
 export default async function AuditoriaPage() {
   const { organizationId } = await requireEmployeeSession();
-  const entries = listAuditLog(organizationId);
+  const entries = await listAuditLog(organizationId);
 
   return (
     <div>

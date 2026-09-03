@@ -39,18 +39,23 @@ const NAV = [...NAV_CORE, ...NAV_OPERACION, ...NAV_CRECIMIENTO, ...NAV_INTELIGEN
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { employeeId, organizationId } = await requireEmployeeSession();
-  const organization = getOrganizationById(organizationId);
-  const employee = getEmployeeById(organizationId, employeeId);
+  const organization = await getOrganizationById(organizationId);
+  const employee = await getEmployeeById(organizationId, employeeId);
   if (!organization || !employee) return null;
 
-  const access = computeAccessState(organizationId);
+  const access = await computeAccessState(organizationId);
   const currentPlan = getPlan(organization.plan);
   const statusMeta = SUBSCRIPTION_STATUS_LABELS[organization.subscriptionStatus];
 
+  const [operacionAccess, crecimientoAccess, inteligenciaAccess] = await Promise.all([
+    hasFeatureAccess(organizationId, "operacion"),
+    hasFeatureAccess(organizationId, "crecimiento"),
+    hasFeatureAccess(organizationId, "inteligencia"),
+  ]);
   const locked: Record<PlanFeatureGroup, boolean> = {
-    operacion: !hasFeatureAccess(organizationId, "operacion"),
-    crecimiento: !hasFeatureAccess(organizationId, "crecimiento"),
-    inteligencia: !hasFeatureAccess(organizationId, "inteligencia"),
+    operacion: !operacionAccess,
+    crecimiento: !crecimientoAccess,
+    inteligencia: !inteligenciaAccess,
   };
 
   return (

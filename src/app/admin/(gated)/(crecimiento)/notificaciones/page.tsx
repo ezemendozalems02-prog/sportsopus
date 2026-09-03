@@ -12,7 +12,10 @@ const KIND_LABELS: Record<string, string> = {
 
 export default async function NotificacionesPage() {
   const { organizationId } = await requireEmployeeSession();
-  const notifications = listNotifications(organizationId);
+  const notifications = await listNotifications(organizationId);
+  const notificationsWithCustomer = await Promise.all(
+    notifications.map(async (n) => ({ n, customer: await getCustomer(organizationId, n.customerId) }))
+  );
 
   return (
     <div>
@@ -23,8 +26,7 @@ export default async function NotificacionesPage() {
       </p>
 
       <div className="mt-6 flex flex-col gap-2">
-        {notifications.map((n) => {
-          const customer = getCustomer(organizationId, n.customerId);
+        {notificationsWithCustomer.map(({ n, customer }) => {
           return (
             <Card key={n.id} className="flex items-start justify-between gap-3">
               <div>
@@ -39,7 +41,7 @@ export default async function NotificacionesPage() {
             </Card>
           );
         })}
-        {notifications.length === 0 && (
+        {notificationsWithCustomer.length === 0 && (
           <Card>
             <p className="text-sm text-zinc-400">Todavía no se generaron notificaciones.</p>
           </Card>

@@ -114,9 +114,6 @@ export interface Employee {
   organizationId: string;
   name: string;
   email: string;
-  // Mock-only plaintext password — stand-in until Supabase Auth manages
-  // credentials for real. Never store passwords like this outside a demo.
-  password: string;
   role: EmployeeRole;
   active: boolean;
 }

@@ -32,19 +32,23 @@ function alertCard(key: string, emoji: string, text: React.ReactNode, href?: str
 export default async function AlertasPage() {
   const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const todayBookings = listBookingsForDate(organizationId, today);
+  const todayBookings = await listBookingsForDate(organizationId, today);
   const pending = todayBookings.filter((b) => b.status === "pendiente_pago");
-  const lowStock = listLowStockProducts(organizationId);
-  const lowDemand = computeLowDemandRecommendations(organizationId, 3);
+  const lowStock = await listLowStockProducts(organizationId);
+  const lowDemand = await computeLowDemandRecommendations(organizationId, 3);
 
-  const cashDiscrepancies = listCashSessions(organizationId)
-    .filter((s) => s.status === "cerrada" && s.closingCountedAmount !== undefined)
-    .map((session) => {
-      const movements = listCashMovements(organizationId, session.id);
-      const expected = session.openingAmount + movements.filter((m) => m.method === "efectivo").reduce((sum, m) => sum + m.amount, 0);
-      const diff = (session.closingCountedAmount ?? 0) - expected;
-      return { session, diff };
-    })
+  const cashSessions = await listCashSessions(organizationId);
+  const closedCashSessions = cashSessions.filter((s) => s.status === "cerrada" && s.closingCountedAmount !== undefined);
+  const cashDiscrepancies = (
+    await Promise.all(
+      closedCashSessions.map(async (session) => {
+        const movements = await listCashMovements(organizationId, session.id);
+        const expected = session.openingAmount + movements.filter((m) => m.method === "efectivo").reduce((sum, m) => sum + m.amount, 0);
+        const diff = (session.closingCountedAmount ?? 0) - expected;
+        return { session, diff };
+      })
+    )
+  )
     .filter((d) => Math.abs(d.diff) >= 1000)
     .slice(0, 5);
 

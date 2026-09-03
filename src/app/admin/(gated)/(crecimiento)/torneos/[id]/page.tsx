@@ -13,11 +13,11 @@ import { MatchResultForm } from "./match-result-form";
 export default async function AdminTorneoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { organizationId } = await requireEmployeeSession();
   const { id } = await params;
-  const tournament = getTournament(organizationId, id);
+  const tournament = await getTournament(organizationId, id);
   if (!tournament) notFound();
 
-  const teams = listTeamsForTournament(id);
-  const matches = listMatchesForTournament(id);
+  const teams = await listTeamsForTournament(id);
+  const matches = await listMatchesForTournament(id);
   const revenue = teams.length * tournament.entryFee;
 
   return (

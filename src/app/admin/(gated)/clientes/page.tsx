@@ -2,8 +2,8 @@ import { getCourt, listBookingsForCustomer, listCustomers } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 
-function customerStats(organizationId: string, customerId: string) {
-  const bookings = listBookingsForCustomer(organizationId, customerId);
+async function customerStats(organizationId: string, customerId: string) {
+  const bookings = await listBookingsForCustomer(organizationId, customerId);
   const spent = bookings.reduce(
     (sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0),
     0
@@ -21,7 +21,14 @@ function customerStats(organizationId: string, customerId: string) {
 
 export default async function ClientesPage() {
   const { organizationId } = await requireEmployeeSession();
-  const customers = listCustomers(organizationId);
+  const customers = await listCustomers(organizationId);
+  const customersWithStats = await Promise.all(
+    customers.map(async (customer) => {
+      const stats = await customerStats(organizationId, customer.id);
+      const favoriteCourt = stats.favoriteCourtId ? await getCourt(organizationId, stats.favoriteCourtId) : undefined;
+      return { customer, stats, favoriteCourt };
+    })
+  );
 
   return (
     <div>
@@ -43,9 +50,7 @@ export default async function ClientesPage() {
             </tr>
           </thead>
           <tbody>
-            {customers.map((customer) => {
-              const stats = customerStats(organizationId, customer.id);
-              const favoriteCourt = stats.favoriteCourtId ? getCourt(organizationId, stats.favoriteCourtId) : undefined;
+            {customersWithStats.map(({ customer, stats, favoriteCourt }) => {
               return (
                 <tr key={customer.id}>
                   <td className="rounded-l-xl bg-white px-3 py-3 dark:bg-zinc-900">

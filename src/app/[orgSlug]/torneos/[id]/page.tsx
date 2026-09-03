@@ -9,14 +9,14 @@ import { RegisterTeamForm } from "./register-form";
 
 export default async function TorneoDetailPage({ params }: { params: Promise<{ orgSlug: string; id: string }> }) {
   const { orgSlug, id } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
-  const tournament = getTournament(org.id, id);
+  const tournament = await getTournament(org.id, id);
   if (!tournament) notFound();
 
-  const teams = listTeamsForTournament(id);
-  const matches = listMatchesForTournament(id);
+  const teams = await listTeamsForTournament(id);
+  const matches = await listMatchesForTournament(id);
 
   return (
     <div>

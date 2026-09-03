@@ -8,7 +8,7 @@ const NAV = [
   { href: "/superadmin/organizaciones", label: "Organizaciones", icon: Building2 },
 ];
 
-export default async function SuperadminLayout({ children }: { children: React.ReactNode }) {
+export default async function SuperadminGatedLayout({ children }: { children: React.ReactNode }) {
   await requireSuperadminSession();
 
   return (

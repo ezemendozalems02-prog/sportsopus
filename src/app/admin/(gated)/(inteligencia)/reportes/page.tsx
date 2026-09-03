@@ -32,9 +32,12 @@ export default async function ReportesPage({
   const fromDate = addDaysISO(today, -(days - 1));
   const inRange = (dateISO: string) => dateISO >= fromDate && dateISO <= today;
 
-  const courts = listCourts(organizationId).filter((c) => c.active);
-  const allSales = listSales(organizationId).filter((s) => inRange(s.createdAt.slice(0, 10)));
-  const allExpenses = listExpenses(organizationId).filter((e) => inRange(e.date));
+  const allCourts = await listCourts(organizationId);
+  const courts = allCourts.filter((c) => c.active);
+  const allSalesUnfiltered = await listSales(organizationId);
+  const allSales = allSalesUnfiltered.filter((s) => inRange(s.createdAt.slice(0, 10)));
+  const allExpensesUnfiltered = await listExpenses(organizationId);
+  const allExpenses = allExpensesUnfiltered.filter((e) => inRange(e.date));
 
   // Revenue collected per booking payment, occupancy and per-court revenue —
   // all derived by walking each day in the period once.
@@ -47,11 +50,12 @@ export default async function ReportesPage({
   for (let offset = -(days - 1); offset <= 0; offset++) {
     const date = addDaysISO(today, offset);
     for (const court of courts) {
-      const slots = getSlotsForCourt(organizationId, court.id, date);
+      const slots = await getSlotsForCourt(organizationId, court.id, date);
       possibleSum += slots.length;
       occupiedSum += slots.filter((s) => !s.available).length;
     }
-    for (const booking of listBookingsForDate(organizationId, date)) {
+    const bookingsForDate = await listBookingsForDate(organizationId, date);
+    for (const booking of bookingsForDate) {
       const paidThisBooking = booking.payments.reduce((sum, p) => (inRange(p.paidAt.slice(0, 10)) ? sum + p.amount : sum), 0);
       if (paidThisBooking === 0) continue;
       canchasRevenue += paidThisBooking;
@@ -62,21 +66,32 @@ export default async function ReportesPage({
   const avgOccupancy = possibleSum ? occupiedSum / possibleSum : 0;
 
   const productosRevenue = allSales.reduce((sum, s) => sum + s.total, 0);
-  const torneosRevenue = listTournaments(organizationId).reduce((sum, t) => {
-    const teams = listTeamsForTournament(t.id).filter((team) => team.paidEntry && inRange(team.registeredAt.slice(0, 10)));
-    return sum + teams.length * t.entryFee;
-  }, 0);
+  const tournaments = await listTournaments(organizationId);
+  const tournamentRevenues = await Promise.all(
+    tournaments.map(async (t) => {
+      const allTeams = await listTeamsForTournament(t.id);
+      const teams = allTeams.filter((team) => team.paidEntry && inRange(team.registeredAt.slice(0, 10)));
+      return teams.length * t.entryFee;
+    })
+  );
+  const torneosRevenue = tournamentRevenues.reduce((sum, r) => sum + r, 0);
   const ingresos = canchasRevenue + productosRevenue + torneosRevenue;
   const gastos = allExpenses.reduce((sum, e) => sum + e.amount, 0);
   const resultado = ingresos - gastos;
 
-  const topCourts = [...revenueByCourt.entries()]
-    .map(([courtId, revenue]) => ({ court: getCourt(organizationId, courtId), revenue }))
+  const topCourts = (
+    await Promise.all(
+      [...revenueByCourt.entries()].map(async ([courtId, revenue]) => ({ court: await getCourt(organizationId, courtId), revenue }))
+    )
+  )
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  const topCustomers = [...revenueByCustomer.entries()]
-    .map(([customerId, spent]) => ({ customer: getCustomer(organizationId, customerId), spent }))
+  const topCustomers = (
+    await Promise.all(
+      [...revenueByCustomer.entries()].map(async ([customerId, spent]) => ({ customer: await getCustomer(organizationId, customerId), spent }))
+    )
+  )
     .sort((a, b) => b.spent - a.spent)
     .slice(0, 5);
 

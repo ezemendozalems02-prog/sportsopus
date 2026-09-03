@@ -18,15 +18,17 @@ import { PaymentMethodPieChart, RevenueTrendChart } from "@/components/charts";
 
 export default async function AnaliticaPage() {
   const { organizationId } = await requireEmployeeSession();
-  const daily = computeDailyRevenue(organizationId, 14);
-  const courtRanking = computeCourtRevenueRanking(organizationId);
-  const hourBands = computeHourBandStats(organizationId);
-  const weekdays = computeWeekdayStats(organizationId);
-  const paymentMethods = computePaymentMethodTotals(organizationId);
-  const category = computeRevenueByCategory(organizationId);
-  const pnl = computeProfitAndLoss(organizationId);
-  const lowDemand = computeLowDemandRecommendations(organizationId, 3);
-  const highDemand = computeHighDemandBand(organizationId);
+  const [daily, courtRanking, hourBands, weekdays, paymentMethods, category, pnl, lowDemand, highDemand] = await Promise.all([
+    computeDailyRevenue(organizationId, 14),
+    computeCourtRevenueRanking(organizationId),
+    computeHourBandStats(organizationId),
+    computeWeekdayStats(organizationId),
+    computePaymentMethodTotals(organizationId),
+    computeRevenueByCategory(organizationId),
+    computeProfitAndLoss(organizationId),
+    computeLowDemandRecommendations(organizationId, 3),
+    computeHighDemandBand(organizationId),
+  ]);
 
   const topCourt = courtRanking[0];
   const bestWeekday = [...weekdays].sort((a, b) => b.occupancyPct - a.occupancyPct)[0];

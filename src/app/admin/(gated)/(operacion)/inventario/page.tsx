@@ -5,9 +5,9 @@ import { RestockButton } from "./restock-button";
 
 export default async function InventarioPage() {
   const { organizationId } = await requireEmployeeSession();
-  const categories = listProductCategories(organizationId);
-  const products = listProducts(organizationId);
-  const lowStock = listLowStockProducts(organizationId);
+  const categories = await listProductCategories(organizationId);
+  const products = await listProducts(organizationId);
+  const lowStock = await listLowStockProducts(organizationId);
 
   return (
     <div>

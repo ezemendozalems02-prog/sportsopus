@@ -1,815 +1,173 @@
 import "server-only";
 import type {
-  AuditLogEntry,
-  BillingInvoice,
-  Booking,
-  BookingPayment,
-  BookingStatus,
-  CashMovement,
-  CashRegisterSession,
-  Court,
-  CourtSurface,
-  Customer,
-  Employee,
-  EmployeeRole,
-  Expense,
-  ExpenseCategory,
-  LoyaltyRedemption,
-  LoyaltyReward,
-  NotificationChannel,
-  NotificationEntry,
-  NotificationKind,
-  Organization,
-  PaymentMethod,
-  Plan,
-  PlanFeatureGroup,
-  PlanId,
-  PlatformAdmin,
-  Product,
-  ProductCategory,
-  Promotion,
-  RankingEntry,
-  Sale,
-  SaleItem,
-  Sport,
-  SubscriptionStatus,
-  Tournament,
-  TournamentMatch,
-  TournamentTeam,
+  AuditLogEntry, BillingInvoice, Booking, BookingPayment, BookingStatus,
+  CashMovement, CashRegisterSession, Court, CourtSurface, Customer, Employee,
+  EmployeeRole, Expense, ExpenseCategory, LoyaltyRedemption, LoyaltyReward,
+  NotificationChannel, NotificationEntry, NotificationKind, Organization,
+  PaymentMethod, Plan, PlanFeatureGroup, PlanId, PlatformAdmin, PriceRule,
+  Product, ProductCategory, Promotion, RankingEntry, Sale, SaleItem, Sport,
+  SubscriptionStatus, Tournament, TournamentMatch, TournamentTeam,
   WaitlistEntry,
 } from "./types";
 import { BLOCKING_STATUSES, generateSlots } from "./availability";
 import { applyPromotion, computeDeposit, findApplicablePromotion, resolveSlotPrice } from "./pricing";
 import { addDaysISO, dayOfWeek, minutesToTime, timeToMinutes, todayISO } from "./time";
-import { mulberry32 } from "./seed-rng";
+import { supabaseAdmin } from "./supabase/admin";
+import {
+  mapAuditLog, mapBillingInvoice, mapBooking, mapCashMovement, mapCashSession,
+  mapCourt, mapCustomer, mapEmployee, mapExpense, mapLoyaltyRedemption,
+  mapLoyaltyReward, mapNotification, mapOrganization, mapProduct,
+  mapProductCategory, mapPromotion, mapSale, mapTournament,
+  mapTournamentMatch, mapTournamentTeam, mapWaitlistEntry,
+} from "./supabase/mappers";
 
 // ---------------------------------------------------------------------------
-// In-memory mock "database" for SportControl.
-//
-// This stands in for Supabase Postgres until real credentials are configured
-// (see .env.example). Every record already carries organizationId so the
-// swap to `supabase/migrations/0001_init.sql` is a matter of replacing the
-// functions below with real queries — the app code above this module never
-// touches the storage shape directly.
-//
-// Multi-tenant: every tenant-scoped function takes `organizationId` as an
-// explicit parameter (resolved from a session cookie or a URL slug by the
-// caller, see src/lib/session.ts) rather than reading an implicit "current
-// org" — a plain module-level variable would leak across concurrent
-// requests from different tenants. `get*` lookups by entity id also check
-// the record's organizationId, so guessing another tenant's id never works.
+// Capa de datos de SportControl — Postgres real (Supabase), vía la service
+// role key (src/lib/supabase/admin.ts). Esta app nunca llama a Supabase
+// directo desde el browser: todo pasa por Server Components/Server Actions
+// de Next, que ya son el límite de confianza real, así que cada función
+// sigue filtrando explícitamente por organizationId (igual disciplina que
+// tenía el mock con los arrays en memoria) en vez de depender de RLS como
+// mecanismo principal — ver el comentario en supabase/migrations/0001_init.sql
+// y 0005_multitenant_auth.sql.
 // ---------------------------------------------------------------------------
 
-const ORG_PALERMO_ID = "org_palermo";
-
-const organizations: Organization[] = [
-  {
-    id: ORG_PALERMO_ID,
-    name: "Sport Club Palermo",
-    slug: "sport-club-palermo",
-    depositPercentage: 0.3,
-    timezone: "America/Argentina/Buenos_Aires",
-    plan: "business",
-    subscriptionStatus: "active",
-    billingEmail: "martin@palermo.club",
-    currentPeriodEnd: addDaysISO(todayISO(), 18),
-    mercadopagoSubscriptionId: "mp_sub_demo_1",
-  },
-];
-let organizationSeq = 2;
-
-const palermoOrg = organizations[0];
-
-// Precio de referencia en USD (como lo pediste). Mercado Pago Suscripciones
-// cobra en la moneda de la cuenta MP (normalmente ARS), así que al conectarlo
-// de verdad hay que fijar `priceARS` con una cotización — acá se muestra un
-// valor ilustrativo (~1000 ARS/USD) solo para no dejarlo vacío en la UI.
-const USD_TO_ARS = 1000;
-
-const PLANS: Plan[] = [
-  {
-    id: "starter",
-    name: "Starter",
-    priceUSD: 27,
-    tagline: "Para arrancar a ordenar las reservas",
-    featureGroups: [],
-    highlights: [
-      "Reservas online con seña",
-      "Agenda y canchas",
-      "Clientes",
-      "Dashboard básico",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    priceUSD: 57,
-    tagline: "Para manejar todo el día a día del complejo",
-    featureGroups: ["operacion"],
-    highlights: [
-      "Todo lo de Starter",
-      "Caja y punto de venta",
-      "Inventario y gastos",
-      "Empleados y auditoría",
-    ],
-  },
-  {
-    id: "business",
-    name: "Business",
-    priceUSD: 97,
-    tagline: "Para crecer con torneos, fidelización y datos",
-    featureGroups: ["operacion", "crecimiento", "inteligencia"],
-    highlights: [
-      "Todo lo de Pro",
-      "Torneos, ranking y fidelización",
-      "Promociones y lista de espera",
-      "Analítica, alertas y reportes",
-    ],
-  },
-];
-
-// Contraseñas mock en texto plano — solo para esta demo sin backend real.
-// Cuando se conecte Supabase Auth, las credenciales pasan a manejarse ahí
-// por completo y este campo desaparece del modelo.
-const DEMO_PASSWORD = "demo1234";
-
-const employees: Employee[] = [
-  { id: "emp_1", organizationId: ORG_PALERMO_ID, name: "Martín Suárez", email: "martin@palermo.club", password: DEMO_PASSWORD, role: "owner", active: true },
-  { id: "emp_2", organizationId: ORG_PALERMO_ID, name: "Camila Ríos", email: "camila@palermo.club", password: DEMO_PASSWORD, role: "admin", active: true },
-  { id: "emp_3", organizationId: ORG_PALERMO_ID, name: "Nico Álvarez", email: "nico@palermo.club", password: DEMO_PASSWORD, role: "cajero", active: true },
-];
-let employeeSeq = employees.length + 1;
-
-// Superadmin (dueño de la plataforma SportControl) — no pertenece a ningún
-// tenant. Credenciales vía variables de entorno con un default de
-// desarrollo, nunca un secreto real hardcodeado en el repo.
-const platformAdmins: PlatformAdmin[] = [
-  {
-    id: "padmin_1",
-    email: process.env.SUPERADMIN_EMAIL ?? "admin@sportcontrol.app",
-    password: process.env.SUPERADMIN_PASSWORD ?? "super1234",
-  },
-];
-
-const weekdayPadelRules = (base: number) => [
-  { id: "valle", label: "Hora valle", daysOfWeek: [1, 2, 3, 4, 5], startTime: "08:00", endTime: "16:00", pricePerSlot: base },
-  { id: "normal", label: "Hora normal", daysOfWeek: [1, 2, 3, 4, 5], startTime: "16:00", endTime: "18:00", pricePerSlot: Math.round(base * 1.2) },
-  { id: "pico", label: "Hora pico", daysOfWeek: [1, 2, 3, 4, 5], startTime: "18:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.47) },
-  { id: "finde", label: "Fin de semana", daysOfWeek: [0, 6], startTime: "08:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.67) },
-];
-
-const weekdayFutbolRules = (base: number) => [
-  { id: "valle", label: "Hora valle", daysOfWeek: [1, 2, 3, 4, 5], startTime: "09:00", endTime: "17:00", pricePerSlot: base },
-  { id: "pico", label: "Hora pico", daysOfWeek: [1, 2, 3, 4, 5], startTime: "17:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.45) },
-  { id: "finde", label: "Fin de semana", daysOfWeek: [0, 6], startTime: "09:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.6) },
-];
-
-function withRuleIds(courtId: string, rules: ReturnType<typeof weekdayPadelRules>) {
-  return rules.map((r) => ({ ...r, id: `${courtId}_${r.id}` }));
+function db() {
+  return supabaseAdmin();
 }
 
-const courts: Court[] = [
-  {
-    id: "court_padel_1", organizationId: ORG_PALERMO_ID, name: "Pádel 1", sport: "padel",
-    surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
-    openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("padel1", weekdayPadelRules(15000)), active: true,
-  },
-  {
-    id: "court_padel_2", organizationId: ORG_PALERMO_ID, name: "Pádel 2", sport: "padel",
-    surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
-    openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("padel2", weekdayPadelRules(15000)), active: true,
-  },
-  {
-    id: "court_padel_3", organizationId: ORG_PALERMO_ID, name: "Pádel 3", sport: "padel",
-    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 90,
-    openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("padel3", weekdayPadelRules(16000)), active: true,
-  },
-  {
-    id: "court_padel_4", organizationId: ORG_PALERMO_ID, name: "Pádel 4", sport: "padel",
-    surface: "sintetico", indoor: false, lighting: false, slotMinutes: 90,
-    openTime: "08:00", closeTime: "22:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("padel4", weekdayPadelRules(13000)), active: true,
-  },
-  {
-    id: "court_futbol5_1", organizationId: ORG_PALERMO_ID, name: "Fútbol 5 #1", sport: "futbol5",
-    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
-    openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("f5a", weekdayFutbolRules(18000)), active: true,
-  },
-  {
-    id: "court_futbol5_2", organizationId: ORG_PALERMO_ID, name: "Fútbol 5 #2", sport: "futbol5",
-    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
-    openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("f5b", weekdayFutbolRules(18000)), active: true,
-  },
-  {
-    id: "court_futbol8_1", organizationId: ORG_PALERMO_ID, name: "Fútbol 8", sport: "futbol8",
-    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
-    openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds("f8", weekdayFutbolRules(26000)), active: true,
-  },
-];
-let courtSeq = 1;
-
-const customerNames = [
-  "Juan Pérez", "Martín Gómez", "Lucas Díaz", "Sofía Fernández", "Agustina López",
-  "Tomás Romero", "Valentina Torres", "Federico Ruiz", "Camila Sosa", "Nicolás Vega",
-];
-
-const customers: Customer[] = customerNames.map((name, i) => ({
-  id: `cust_${i + 1}`,
-  organizationId: ORG_PALERMO_ID,
-  name,
-  email: `${name.toLowerCase().replace(/[^a-z]+/g, ".")}@mail.com`,
-  phone: `+54 9 11 4${String(1000 + i * 37).padStart(4, "0")}-${String(2000 + i * 53).padStart(4, "0")}`,
-  favoriteSport: i % 3 === 0 ? "futbol5" : "padel",
-  loyaltyPoints: Math.round((i * 733) % 2200),
-}));
-let customerSeq = customers.length + 1;
-
-// Target occupancy per court, matching the numbers used to design the dashboard.
-const occupancyTarget: Record<string, number> = {
-  court_padel_1: 0.82,
-  court_padel_2: 0.74,
-  court_padel_3: 0.91,
-  court_padel_4: 0.63,
-  court_futbol5_1: 0.88,
-  court_futbol5_2: 0.79,
-  court_futbol8_1: 0.7,
-};
-
-function listSlotStarts(court: Court, dateISO: string): string[] {
-  if (!court.daysOpen.includes(dayOfWeek(dateISO))) return [];
-  const open = timeToMinutes(court.openTime);
-  const close = timeToMinutes(court.closeTime);
-  const starts: string[] = [];
-  for (let t = open; t + court.slotMinutes <= close; t += court.slotMinutes) {
-    starts.push(minutesToTime(t));
-  }
-  return starts;
-}
-
-function statusForOffset(dayOffset: number, rand: () => number): BookingStatus {
-  if (dayOffset < 0) {
-    const r = rand();
-    if (r < 0.06) return "no_show";
-    if (r < 0.12) return "cancelada";
-    return "finalizada";
-  }
-  if (dayOffset === 0) {
-    const r = rand();
-    if (r < 0.5) return "confirmada";
-    if (r < 0.8) return "sena_pagada";
-    return "pendiente_pago";
-  }
-  const r = rand();
-  if (r < 0.55) return "confirmada";
-  if (r < 0.9) return "sena_pagada";
-  return "pendiente_pago";
-}
-
-function buildPayments(booking: Omit<Booking, "payments">, rand: () => number): BookingPayment[] {
-  const payments: BookingPayment[] = [];
-  const methods: Booking["payments"][number]["method"][] = [
-    "mercado_pago", "efectivo", "transferencia", "tarjeta",
-  ];
-  const method = methods[Math.floor(rand() * methods.length)];
-  const paidBase = `${booking.date}T${booking.startTime}:00`;
-
-  if (booking.status !== "pendiente_pago") {
-    payments.push({
-      id: `pay_${booking.id}_sena`,
-      bookingId: booking.id,
-      concept: "sena",
-      amount: booking.depositAmount,
-      method: "mercado_pago",
-      status: "aprobado",
-      paidAt: paidBase,
-    });
-  }
-  if (["confirmada", "en_curso", "finalizada"].includes(booking.status)) {
-    payments.push({
-      id: `pay_${booking.id}_saldo`,
-      bookingId: booking.id,
-      concept: "saldo",
-      amount: booking.balanceAmount,
-      method,
-      status: "aprobado",
-      paidAt: paidBase,
-    });
-  }
-  return payments;
-}
-
-function seedBookings(): Booking[] {
-  const rand = mulberry32(20260902);
-  const bookings: Booking[] = [];
-  const today = todayISO();
-
-  // 5 semanas de historia + 1 hacia adelante, para que Fase 4 (analítica,
-  // predicción de demanda) tenga datos reales sobre los que calcular tendencias.
-  for (let offset = -35; offset <= 6; offset++) {
-    const dateISO = addDaysISO(today, offset);
-    for (const court of courts) {
-      const starts = listSlotStarts(court, dateISO);
-      const target = occupancyTarget[court.id] ?? 0.75;
-      for (const startTime of starts) {
-        if (rand() > target) continue;
-
-        const endMinutes = timeToMinutes(startTime) + court.slotMinutes;
-        const status = statusForOffset(offset, rand);
-        const totalPrice = resolveSlotPrice(court, dateISO, startTime);
-        const { depositAmount, balanceAmount } = computeDeposit(totalPrice, palermoOrg);
-        const customer = customers[Math.floor(rand() * customers.length)];
-
-        const id = `bk_${court.id}_${dateISO}_${startTime.replace(":", "")}`;
-        const base: Omit<Booking, "payments"> = {
-          id,
-          organizationId: ORG_PALERMO_ID,
-          courtId: court.id,
-          customerId: customer.id,
-          date: dateISO,
-          startTime,
-          endTime: minutesToTime(endMinutes),
-          totalPrice,
-          depositAmount,
-          balanceAmount,
-          status,
-          createdAt: `${addDaysISO(dateISO, -2)}T10:00:00`,
-        };
-        bookings.push({ ...base, payments: buildPayments(base, rand) });
-      }
-    }
-  }
-  return bookings;
-}
-
-const bookings: Booking[] = seedBookings();
-let bookingSeq = bookings.length + 1;
-
-// ---------------------------------------------------------------------------
-// Fase 2 — Operación: productos, inventario, caja/POS, gastos, auditoría
-// ---------------------------------------------------------------------------
-
-const productCategories: ProductCategory[] = [
-  { id: "cat_bebidas", organizationId: ORG_PALERMO_ID, name: "Bebidas" },
-  { id: "cat_snacks", organizationId: ORG_PALERMO_ID, name: "Snacks" },
-  { id: "cat_comidas", organizationId: ORG_PALERMO_ID, name: "Comidas" },
-  { id: "cat_accesorios", organizationId: ORG_PALERMO_ID, name: "Accesorios" },
-];
-
-const products: Product[] = [
-  { id: "prod_agua", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Agua", sku: "BEB-001", cost: 1000, price: 2000, stock: 38, minStock: 15, active: true },
-  { id: "prod_gatorade", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Gatorade", sku: "BEB-002", cost: 1800, price: 3500, stock: 8, minStock: 10, active: true },
-  { id: "prod_cocacola", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Coca-Cola", sku: "BEB-003", cost: 1500, price: 3000, stock: 24, minStock: 12, active: true },
-  { id: "prod_cerveza", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Cerveza", sku: "BEB-004", cost: 2200, price: 4000, stock: 30, minStock: 12, active: true },
-  { id: "prod_cafe", organizationId: ORG_PALERMO_ID, categoryId: "cat_bebidas", name: "Café", sku: "BEB-005", cost: 1000, price: 2500, stock: 20, minStock: 10, active: true },
-  { id: "prod_papas", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Papas fritas", sku: "SNK-001", cost: 1400, price: 3000, stock: 6, minStock: 10, active: true },
-  { id: "prod_alfajor", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Alfajor", sku: "SNK-002", cost: 900, price: 1800, stock: 40, minStock: 15, active: true },
-  { id: "prod_barrita", organizationId: ORG_PALERMO_ID, categoryId: "cat_snacks", name: "Barrita de cereal", sku: "SNK-003", cost: 1100, price: 2200, stock: 9, minStock: 10, active: true },
-  { id: "prod_hamburguesa", organizationId: ORG_PALERMO_ID, categoryId: "cat_comidas", name: "Hamburguesa", sku: "CMD-001", cost: 3500, price: 7000, stock: 18, minStock: 8, active: true },
-  { id: "prod_pancho", organizationId: ORG_PALERMO_ID, categoryId: "cat_comidas", name: "Pancho", sku: "CMD-002", cost: 2000, price: 4500, stock: 22, minStock: 8, active: true },
-  { id: "prod_pelotas", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Pelotas de pádel (tubo x3)", sku: "ACC-001", cost: 7000, price: 12000, stock: 14, minStock: 6, active: true },
-  { id: "prod_grip", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Grip", sku: "ACC-002", cost: 1200, price: 2500, stock: 3, minStock: 8, active: true },
-  { id: "prod_remera", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Remera del club", sku: "ACC-003", cost: 9000, price: 18000, stock: 11, minStock: 5, active: true },
-  { id: "prod_paleta", organizationId: ORG_PALERMO_ID, categoryId: "cat_accesorios", name: "Paleta de pádel", sku: "ACC-004", cost: 55000, price: 85000, stock: 4, minStock: 3, active: true },
-];
-
-const auditLog: AuditLogEntry[] = [];
-let auditSeq = 1;
-
-function logAudit(organizationId: string, employeeId: string | null, action: string, detail: string, when: string = new Date().toISOString()) {
-  const employee = employeeId ? employees.find((e) => e.id === employeeId) : undefined;
-  auditLog.unshift({
-    id: `audit_${auditSeq++}`,
-    organizationId,
-    employeeId: employeeId ?? "system",
-    employeeName: employee?.name ?? "Sistema",
-    action,
-    detail,
-    createdAt: when,
-  });
-}
-
-const expenseCategories: { category: ExpenseCategory; label: string; amount: number }[] = [
-  { category: "alquiler", label: "Alquiler del predio", amount: 850000 },
-  { category: "sueldos", label: "Sueldos del personal", amount: 1450000 },
-  { category: "luz", label: "Factura de luz", amount: 180000 },
-  { category: "agua", label: "Factura de agua", amount: 60000 },
-  { category: "mantenimiento", label: "Mantenimiento de canchas", amount: 120000 },
-  { category: "insumos", label: "Compra de bebidas y snacks", amount: 210000 },
-  { category: "limpieza", label: "Insumos de limpieza", amount: 45000 },
-  { category: "publicidad", label: "Publicidad en redes", amount: 60000 },
-];
-
-function seedExpenses(): Expense[] {
-  const rand = mulberry32(20260902 + 7);
-  const today = todayISO();
-  const expenses: Expense[] = [];
-  let seq = 1;
-
-  for (let offset = -28; offset <= -1; offset++) {
-    const dateISO = addDaysISO(today, offset);
-    const dow = dayOfWeek(dateISO);
-    // Alquiler y sueldos caen el día 1; el resto son más esporádicos.
-    if (dateISO.endsWith("-01")) {
-      expenses.push(makeExpense(seq++, "alquiler", "Alquiler del predio", 850000, dateISO));
-      expenses.push(makeExpense(seq++, "sueldos", "Sueldos del personal", 1450000, dateISO));
-    }
-    if (dow === 5 && rand() < 0.7) {
-      const pick = expenseCategories[Math.floor(rand() * expenseCategories.length)];
-      expenses.push(makeExpense(seq++, pick.category, pick.label, Math.round(pick.amount * (0.7 + rand() * 0.6)), dateISO));
-    }
-  }
-  return expenses;
-}
-
-function makeExpense(seq: number, category: ExpenseCategory, description: string, amount: number, dateISO: string): Expense {
-  return {
-    id: `exp_${seq}`,
-    organizationId: ORG_PALERMO_ID,
-    employeeId: "emp_1",
-    category,
-    description,
-    amount,
-    date: dateISO,
-    createdAt: `${dateISO}T09:00:00`,
-  };
-}
-
-const expenses: Expense[] = seedExpenses();
-let expenseSeq = expenses.length + 1;
-
-// Cash register: a few closed historical sessions with sales, plus no open
-// session today — the operator has to "abrir caja" to start the demo, same
-// as in a real shift.
-const cashSessions: CashRegisterSession[] = [];
-const cashMovements: CashMovement[] = [];
-const sales: Sale[] = [];
-let cashSessionSeq = 1;
-let cashMovementSeq = 1;
-let saleSeq = 1;
-
-function seedCashHistory() {
-  const rand = mulberry32(20260902 + 13);
-  const today = todayISO();
-  const cashiers = ["emp_2", "emp_3"];
-
-  for (let offset = -21; offset <= -1; offset++) {
-    const dateISO = addDaysISO(today, offset);
-    const employeeId = cashiers[Math.floor(rand() * cashiers.length)];
-    const openingAmount = 20000;
-    const sessionId = `cash_${cashSessionSeq++}`;
-    let cashTotal = openingAmount;
-
-    const saleCount = 4 + Math.floor(rand() * 6);
-    for (let i = 0; i < saleCount; i++) {
-      const itemCount = 1 + Math.floor(rand() * 3);
-      const items: SaleItem[] = [];
-      for (let j = 0; j < itemCount; j++) {
-        const product = products[Math.floor(rand() * products.length)];
-        const quantity = 1 + Math.floor(rand() * 2);
-        items.push({ productId: product.id, name: product.name, quantity, unitPrice: product.price });
-      }
-      const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
-      const methods: PaymentMethod[] = ["efectivo", "mercado_pago", "tarjeta", "transferencia"];
-      const method = methods[Math.floor(rand() * methods.length)];
-      const time = `${String(9 + Math.floor(rand() * 13)).padStart(2, "0")}:${rand() < 0.5 ? "00" : "30"}`;
-
-      sales.push({
-        id: `sale_${saleSeq++}`,
-        organizationId: ORG_PALERMO_ID,
-        cashSessionId: sessionId,
-        employeeId,
-        items,
-        total,
-        method,
-        createdAt: `${dateISO}T${time}:00`,
-      });
-      cashMovements.push({
-        id: `cmov_${cashMovementSeq++}`,
-        organizationId: ORG_PALERMO_ID,
-        cashSessionId: sessionId,
-        type: "venta",
-        amount: total,
-        method,
-        concept: items.map((it) => `${it.quantity}x ${it.name}`).join(", "),
-        employeeId,
-        createdAt: `${dateISO}T${time}:00`,
-      });
-      if (method === "efectivo") cashTotal += total;
-    }
-
-    const closingCountedAmount = Math.max(0, Math.round(cashTotal + (rand() - 0.5) * 2000));
-    cashSessions.push({
-      id: sessionId,
-      organizationId: ORG_PALERMO_ID,
-      employeeId,
-      status: "cerrada",
-      openingAmount,
-      openedAt: `${dateISO}T09:00:00`,
-      closingCountedAmount,
-      closedAt: `${dateISO}T22:00:00`,
-    });
-    logAudit(ORG_PALERMO_ID, employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(closingCountedAmount)} contados`, `${dateISO}T22:01:00`);
-  }
+function must<T>(data: T | null, error: unknown, notFoundMsg = "No encontrado"): T {
+  if (error) throw error instanceof Error ? error : new Error(String(error));
+  if (data == null) throw new Error(notFoundMsg);
+  return data;
 }
 
 function formatArs(amount: number) {
   return `$${Math.round(amount).toLocaleString("es-AR")}`;
 }
 
-seedCashHistory();
-
 // ---------------------------------------------------------------------------
-// Fase 3 — Crecimiento: promociones, fidelización, lista de espera,
-// notificaciones y torneos
+// Planes (catálogo en código, no en tabla — ver 0004_saas.sql)
 // ---------------------------------------------------------------------------
 
-const promotions: Promotion[] = [
+const USD_TO_ARS = 1000;
+
+const PLANS: Plan[] = [
   {
-    id: "promo_happy_hour",
-    organizationId: ORG_PALERMO_ID,
-    label: "Happy Hour Pádel",
-    discountPercentage: 0.2,
-    daysOfWeek: [1, 2, 3, 4],
-    startTime: "14:00",
-    endTime: "17:00",
-    sports: ["padel"],
-    active: true,
+    id: "starter", name: "Starter", priceUSD: 27,
+    tagline: "Para arrancar a ordenar las reservas",
+    featureGroups: [],
+    highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Dashboard básico"],
+  },
+  {
+    id: "pro", name: "Pro", priceUSD: 57,
+    tagline: "Para manejar todo el día a día del complejo",
+    featureGroups: ["operacion"],
+    highlights: ["Todo lo de Starter", "Caja y punto de venta", "Inventario y gastos", "Empleados y auditoría"],
+  },
+  {
+    id: "business", name: "Business", priceUSD: 97,
+    tagline: "Para crecer con torneos, fidelización y datos",
+    featureGroups: ["operacion", "crecimiento", "inteligencia"],
+    highlights: ["Todo lo de Pro", "Torneos, ranking y fidelización", "Promociones y lista de espera", "Analítica, alertas y reportes"],
   },
 ];
-let promotionSeq = promotions.length + 1;
 
-const loyaltyRewards: LoyaltyReward[] = [
-  { id: "reward_bebida", label: "Bebida gratis", pointsCost: 150, kind: "producto" },
-  { id: "reward_descuento", label: "$10.000 de descuento", pointsCost: 1000, kind: "descuento" },
-  { id: "reward_hora", label: "Hora bonificada", pointsCost: 1800, kind: "hora_bonificada" },
-];
-
-const loyaltyRedemptions: LoyaltyRedemption[] = [];
-let redemptionSeq = 1;
-
-function awardLoyaltyPoints(customerId: string, amountSpent: number) {
-  const customer = customers.find((c) => c.id === customerId);
-  if (!customer) return;
-  customer.loyaltyPoints += Math.floor(amountSpent / 100);
+export function listPlans(): Plan[] {
+  return PLANS;
 }
 
-const waitlist: WaitlistEntry[] = [];
-let waitlistSeq = 1;
-
-const notifications: NotificationEntry[] = [];
-let notificationSeq = 1;
-
-function notify(organizationId: string, customerId: string, kind: NotificationKind, message: string, channel: NotificationChannel = "whatsapp") {
-  notifications.unshift({
-    id: `notif_${notificationSeq++}`,
-    organizationId,
-    customerId,
-    channel,
-    kind,
-    message,
-    createdAt: new Date().toISOString(),
-  });
+export function getPlan(planId: PlanId): Plan | undefined {
+  return PLANS.find((p) => p.id === planId);
 }
 
-// ---- Torneos -----------------------------------------------------------
-
-const tournaments: Tournament[] = [];
-const tournamentTeams: TournamentTeam[] = [];
-const tournamentMatches: TournamentMatch[] = [];
-let tournamentSeq = 1;
-let tournamentTeamSeq = 1;
-let tournamentMatchSeq = 1;
-
-function bracketSize(teamCount: number): number {
-  let size = 2;
-  while (size < teamCount) size *= 2;
-  return size;
+export function priceInArs(priceUSD: number): number {
+  return priceUSD * USD_TO_ARS;
 }
-
-function propagateWinner(tournamentId: string, match: TournamentMatch) {
-  if (!match.winnerTeamId) return;
-  const nextRound = match.round + 1;
-  const nextIndex = Math.floor(match.matchIndex / 2);
-  const nextMatch = tournamentMatches.find(
-    (m) => m.tournamentId === tournamentId && m.round === nextRound && m.matchIndex === nextIndex
-  );
-  if (!nextMatch) return; // era la final
-  if (match.matchIndex % 2 === 0) nextMatch.teamAId = match.winnerTeamId;
-  else nextMatch.teamBId = match.winnerTeamId;
-}
-
-function generateBracketInternal(tournamentId: string): TournamentMatch[] {
-  const teams = tournamentTeams.filter((t) => t.tournamentId === tournamentId);
-  const size = bracketSize(teams.length);
-  const rounds = Math.log2(size);
-  const slots: (string | undefined)[] = teams.map((t) => t.id);
-  while (slots.length < size) slots.push(undefined);
-
-  const round1: TournamentMatch[] = [];
-  for (let i = 0; i < size / 2; i++) {
-    const teamAId = slots[i * 2];
-    const teamBId = slots[i * 2 + 1];
-    const onlyOne = (teamAId && !teamBId) || (!teamAId && teamBId);
-    round1.push({
-      id: `tm_${tournamentMatchSeq++}`,
-      tournamentId,
-      round: 1,
-      matchIndex: i,
-      teamAId,
-      teamBId,
-      status: onlyOne ? "bye" : "pendiente",
-      winnerTeamId: onlyOne ? (teamAId ?? teamBId) : undefined,
-    });
-  }
-  const allMatches = [...round1];
-
-  let prevRoundCount = size / 2;
-  for (let r = 2; r <= rounds; r++) {
-    const count = prevRoundCount / 2;
-    for (let i = 0; i < count; i++) {
-      allMatches.push({ id: `tm_${tournamentMatchSeq++}`, tournamentId, round: r, matchIndex: i, status: "pendiente" });
-    }
-    prevRoundCount = count;
-  }
-
-  tournamentMatches.push(...allMatches);
-  for (const m of round1) {
-    if (m.status === "bye") propagateWinner(tournamentId, m);
-  }
-  return allMatches;
-}
-
-function seedTournaments() {
-  const today = todayISO();
-
-  // Torneo 1: en curso, cuadro generado con resultados parciales cargados.
-  const t1: Tournament = {
-    id: `tourn_${tournamentSeq++}`,
-    organizationId: ORG_PALERMO_ID,
-    name: "Torneo Apertura Pádel",
-    sport: "padel",
-    category: "8va",
-    date: addDaysISO(today, 12),
-    maxTeams: 8,
-    entryFee: 30000,
-    prize: "Trofeo + kit de pelotas",
-    status: "inscripcion",
-    createdAt: addDaysISO(today, -20),
-  };
-  tournaments.push(t1);
-
-  const t1Pairs = [
-    ["Juan Pérez", "Martín Gómez"],
-    ["Lucas Díaz", "Sofía Fernández"],
-    ["Agustina López", "Tomás Romero"],
-    ["Valentina Torres", "Federico Ruiz"],
-    ["Camila Sosa", "Nicolás Vega"],
-    ["Rocío Medina", "Ezequiel Paz"],
-    ["Brenda Acosta", "Ignacio Castro"],
-    ["Milagros Ibáñez", "Franco Molina"],
-  ];
-  for (const [p1, p2] of t1Pairs) {
-    tournamentTeams.push({
-      id: `tteam_${tournamentTeamSeq++}`,
-      tournamentId: t1.id,
-      name: `${p1.split(" ")[0]} / ${p2.split(" ")[0]}`,
-      playerNames: [p1, p2],
-      paidEntry: true,
-      registeredAt: addDaysISO(today, -18),
-    });
-  }
-  t1.status = "en_curso";
-  const t1Matches = generateBracketInternal(t1.id);
-
-  const round1 = t1Matches.filter((m) => m.round === 1);
-  const round1Winners = [0, 0, 1, 0]; // índice de equipo ganador (0=A, 1=B) por partido
-  round1.forEach((match, i) => {
-    const winnerTeamId = round1Winners[i] === 0 ? match.teamAId : match.teamBId;
-    match.status = "jugado";
-    match.winnerTeamId = winnerTeamId;
-    match.scoreLabel = ["6-4 6-3", "7-5 4-6 6-2", "6-2 6-4", "6-3 6-4"][i];
-    propagateWinner(t1.id, match);
-  });
-
-  const round2 = t1Matches.filter((m) => m.round === 2);
-  const semi1 = round2[0];
-  semi1.status = "jugado";
-  semi1.winnerTeamId = semi1.teamAId;
-  semi1.scoreLabel = "6-4 6-2";
-  propagateWinner(t1.id, semi1);
-
-  // Torneo 2: todavía en inscripción, sin cuadro generado.
-  const t2: Tournament = {
-    id: `tourn_${tournamentSeq++}`,
-    organizationId: ORG_PALERMO_ID,
-    name: "Copa Otoño Fútbol 5",
-    sport: "futbol5",
-    category: "Libre",
-    date: addDaysISO(today, 25),
-    maxTeams: 8,
-    entryFee: 15000,
-    prize: "Copa + medallas",
-    status: "inscripcion",
-    createdAt: addDaysISO(today, -5),
-  };
-  tournaments.push(t2);
-
-  const t2Teams = [
-    { name: "Los Pibes FC", players: ["Diego Herrera", "Pablo Ríos", "Marcos Silva", "Emiliano Cruz", "Agustín Blanco"] },
-    { name: "Tigres FC", players: ["Rodrigo Luna", "Bruno Vega", "Santiago Ortiz", "Julián Paz", "Matías Correa"] },
-    { name: "Atlético Palermo", players: ["Franco Aguirre", "Nahuel Rivas", "Joaquín Soto", "Ramiro Núñez", "Ivo Campos"] },
-  ];
-  for (const team of t2Teams) {
-    tournamentTeams.push({
-      id: `tteam_${tournamentTeamSeq++}`,
-      tournamentId: t2.id,
-      name: team.name,
-      playerNames: team.players,
-      paidEntry: true,
-      registeredAt: addDaysISO(today, -3),
-    });
-  }
-}
-
-seedTournaments();
 
 // ---------------------------------------------------------------------------
-// SaaS — historial de facturación de la suscripción (no de las canchas)
+// Superadmin (dueño de la plataforma) — credenciales por env var, sin tabla.
+// No es un tenant y no necesita Supabase Auth; se mantiene igual que antes
+// para que pueda convivir en el mismo navegador con una sesión de empleado.
 // ---------------------------------------------------------------------------
 
-const billingInvoices: BillingInvoice[] = [];
-let billingInvoiceSeq = 1;
-
-function seedBillingInvoices() {
-  const today = todayISO();
-  // 3 meses pagados en Business, para que /admin/plan tenga historial real.
-  for (let i = 3; i >= 1; i--) {
-    const periodStart = addDaysISO(today, -30 * i);
-    const periodEnd = addDaysISO(periodStart, 30);
-    billingInvoices.push({
-      id: `inv_${billingInvoiceSeq++}`,
-      organizationId: ORG_PALERMO_ID,
-      plan: "business",
-      amountUSD: 97,
-      status: "pagada",
-      periodStart,
-      periodEnd,
-      createdAt: `${periodStart}T09:00:00`,
-    });
-  }
-}
-
-seedBillingInvoices();
-
-// ---------------------------------------------------------------------------
-// Sesiones (mock — token opaco en un Map, igual que sería una sesión real de
-// Supabase Auth consultada server-side; ver src/lib/session.ts para el lado
-// de las cookies).
-// ---------------------------------------------------------------------------
-
-export type SessionRecord =
-  | { kind: "employee"; employeeId: string; organizationId: string }
-  | { kind: "customer"; customerId: string; organizationId: string }
-  | { kind: "superadmin"; adminId: string };
-
-const sessions = new Map<string, SessionRecord>();
-
-function randomToken(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `tok_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-export function createSession(record: SessionRecord): string {
-  const token = randomToken();
-  sessions.set(token, record);
-  return token;
-}
-
-export function getSession(token: string | undefined | null): SessionRecord | undefined {
-  if (!token) return undefined;
-  return sessions.get(token);
-}
-
-export function destroySession(token: string | undefined | null) {
-  if (token) sessions.delete(token);
-}
-
-export function verifyEmployeeCredentials(email: string, password: string): Employee | undefined {
-  return employees.find(
-    (e) => e.active && e.email.toLowerCase() === email.trim().toLowerCase() && e.password === password
-  );
-}
+const platformAdmin: PlatformAdmin = {
+  id: "padmin_1",
+  email: process.env.SUPERADMIN_EMAIL ?? "admin@sportcontrol.app",
+  password: process.env.SUPERADMIN_PASSWORD ?? "super1234",
+};
 
 export function verifyPlatformAdminCredentials(email: string, password: string): PlatformAdmin | undefined {
-  return platformAdmins.find(
-    (a) => a.email.toLowerCase() === email.trim().toLowerCase() && a.password === password
+  return platformAdmin.email.toLowerCase() === email.trim().toLowerCase() && platformAdmin.password === password
+    ? platformAdmin
+    : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Precios base para canchas nuevas (seed de una org nueva / createCourt)
+// ---------------------------------------------------------------------------
+
+export function weekdayPadelRules(base: number): Omit<PriceRule, "id">[] {
+  return [
+    { label: "Hora valle", daysOfWeek: [1, 2, 3, 4, 5], startTime: "08:00", endTime: "16:00", pricePerSlot: base },
+    { label: "Hora normal", daysOfWeek: [1, 2, 3, 4, 5], startTime: "16:00", endTime: "18:00", pricePerSlot: Math.round(base * 1.2) },
+    { label: "Hora pico", daysOfWeek: [1, 2, 3, 4, 5], startTime: "18:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.47) },
+    { label: "Fin de semana", daysOfWeek: [0, 6], startTime: "08:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.67) },
+  ];
+}
+
+export function weekdayFutbolRules(base: number): Omit<PriceRule, "id">[] {
+  return [
+    { label: "Hora valle", daysOfWeek: [1, 2, 3, 4, 5], startTime: "09:00", endTime: "17:00", pricePerSlot: base },
+    { label: "Hora pico", daysOfWeek: [1, 2, 3, 4, 5], startTime: "17:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.45) },
+    { label: "Fin de semana", daysOfWeek: [0, 6], startTime: "09:00", endTime: "23:00", pricePerSlot: Math.round(base * 1.6) },
+  ];
+}
+
+async function insertCourtWithRules(organizationId: string, court: {
+  name: string; sport: Sport; surface: CourtSurface; indoor: boolean; lighting: boolean;
+  slotMinutes: number; openTime: string; closeTime: string;
+}, rules: Omit<PriceRule, "id">[]): Promise<Court> {
+  const { data: courtRow, error } = await db()
+    .from("courts")
+    .insert({
+      organization_id: organizationId,
+      name: court.name,
+      sport: court.sport,
+      surface: court.surface,
+      indoor: court.indoor,
+      lighting: court.lighting,
+      slot_minutes: court.slotMinutes,
+      open_time: court.openTime,
+      close_time: court.closeTime,
+      days_open: [0, 1, 2, 3, 4, 5, 6],
+    })
+    .select()
+    .single();
+  must(courtRow, error);
+
+  const { error: rulesError } = await db().from("court_price_rules").insert(
+    rules.map((r) => ({
+      court_id: courtRow.id,
+      label: r.label,
+      days_of_week: r.daysOfWeek,
+      start_time: r.startTime,
+      end_time: r.endTime,
+      price_per_slot: r.pricePerSlot,
+    }))
   );
+  if (rulesError) throw rulesError;
+
+  const court2 = await getCourt(organizationId, courtRow.id);
+  return court2!;
+}
+
+async function seedDefaultLoyaltyRewardsFor(organizationId: string) {
+  await db().from("loyalty_rewards").insert([
+    { organization_id: organizationId, label: "Bebida gratis", points_cost: 150, kind: "producto" },
+    { organization_id: organizationId, label: "$10.000 de descuento", points_cost: 1000, kind: "descuento" },
+    { organization_id: organizationId, label: "Hora bonificada", points_cost: 1800, kind: "hora_bonificada" },
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -831,85 +189,97 @@ function slugify(value: string): string {
   return base || "complejo";
 }
 
-function generateUniqueSlug(name: string): string {
+async function generateUniqueSlug(name: string): Promise<string> {
   const base = slugify(name);
-  let candidate = base;
+  const { data } = await db().from("organizations").select("slug").like("slug", `${base}%`);
+  const taken = new Set((data ?? []).map((r: { slug: string }) => r.slug));
+  if (!taken.has(base) && !RESERVED_SLUGS.has(base)) return base;
   let n = 2;
-  while (organizations.some((o) => o.slug === candidate) || RESERVED_SLUGS.has(candidate)) {
-    candidate = `${base}-${n++}`;
-  }
-  return candidate;
-}
-
-function seedDefaultCourtsFor(organizationId: string) {
-  const padelId = `court_${courtSeq++}`;
-  courts.push({
-    id: padelId, organizationId, name: "Cancha de pádel 1", sport: "padel",
-    surface: "sintetico", indoor: true, lighting: true, slotMinutes: 90,
-    openTime: "08:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds(padelId, weekdayPadelRules(15000)), active: true,
-  });
-  const futbolId = `court_${courtSeq++}`;
-  courts.push({
-    id: futbolId, organizationId, name: "Fútbol 5", sport: "futbol5",
-    surface: "sintetico", indoor: false, lighting: true, slotMinutes: 60,
-    openTime: "09:00", closeTime: "23:00", daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds(futbolId, weekdayFutbolRules(18000)), active: true,
-  });
+  while (taken.has(`${base}-${n}`) || RESERVED_SLUGS.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
 }
 
 const TRIAL_DAYS = 7;
 
-export function createOrganization(input: {
+export async function createOrganization(input: {
   name: string;
   ownerName: string;
   ownerEmail: string;
   ownerPassword: string;
   planId: PlanId;
-}): { organization: Organization; owner: Employee } {
-  if (employees.some((e) => e.email.toLowerCase() === input.ownerEmail.trim().toLowerCase())) {
-    throw new Error("Ya existe una cuenta con ese email");
-  }
-
-  const organization: Organization = {
-    id: `org_${organizationSeq++}`,
-    name: input.name,
-    slug: generateUniqueSlug(input.name),
-    depositPercentage: 0.3,
-    timezone: "America/Argentina/Buenos_Aires",
-    plan: input.planId,
-    subscriptionStatus: "trialing",
-    billingEmail: input.ownerEmail,
-    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
-  };
-  organizations.push(organization);
-
-  const owner: Employee = {
-    id: `emp_${employeeSeq++}`,
-    organizationId: organization.id,
-    name: input.ownerName,
+}): Promise<{ organization: Organization; owner: Employee }> {
+  const { data: authUser, error: authError } = await db().auth.admin.createUser({
     email: input.ownerEmail,
     password: input.ownerPassword,
-    role: "owner",
-    active: true,
-  };
-  employees.push(owner);
+    email_confirm: true,
+  });
+  if (authError) {
+    throw new Error(authError.message.includes("already been registered") ? "Ya existe una cuenta con ese email" : authError.message);
+  }
 
-  seedDefaultCourtsFor(organization.id);
-  logAudit(organization.id, owner.id, "Cuenta creada", `${organization.name} · plan ${input.planId} · prueba gratis ${TRIAL_DAYS} días`);
+  const slug = await generateUniqueSlug(input.name);
+  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: orgRow, error: orgError } = await db()
+    .from("organizations")
+    .insert({
+      name: input.name,
+      slug,
+      plan: input.planId,
+      subscription_status: "trialing",
+      billing_email: input.ownerEmail,
+      trial_ends_at: trialEndsAt,
+    })
+    .select()
+    .single();
+  if (orgError) {
+    await db().auth.admin.deleteUser(authUser.user.id);
+    throw orgError;
+  }
+
+  const { data: empRow, error: empError } = await db()
+    .from("employees")
+    .insert({
+      organization_id: orgRow.id,
+      user_id: authUser.user.id,
+      name: input.ownerName,
+      email: input.ownerEmail,
+      role: "owner",
+    })
+    .select()
+    .single();
+  if (empError) throw empError;
+
+  await Promise.all([
+    insertCourtWithRules(orgRow.id, {
+      name: "Cancha de pádel 1", sport: "padel", surface: "sintetico", indoor: true, lighting: true,
+      slotMinutes: 90, openTime: "08:00", closeTime: "23:00",
+    }, weekdayPadelRules(15000)),
+    insertCourtWithRules(orgRow.id, {
+      name: "Fútbol 5", sport: "futbol5", surface: "sintetico", indoor: false, lighting: true,
+      slotMinutes: 60, openTime: "09:00", closeTime: "23:00",
+    }, weekdayFutbolRules(18000)),
+    seedDefaultLoyaltyRewardsFor(orgRow.id),
+  ]);
+
+  const organization = mapOrganization(orgRow);
+  const owner = mapEmployee(empRow);
+  await logAudit(organization.id, owner.id, "Cuenta creada", `${organization.name} · plan ${input.planId} · prueba gratis ${TRIAL_DAYS} días`);
 
   return { organization, owner };
 }
 
-export function getOrganizationById(organizationId: string): Organization | undefined {
-  return organizations.find((o) => o.id === organizationId);
+export async function getOrganizationById(organizationId: string): Promise<Organization | undefined> {
+  const { data } = await db().from("organizations").select("*").eq("id", organizationId).maybeSingle();
+  return data ? mapOrganization(data) : undefined;
 }
 
-export function getOrganizationBySlug(slug: string): Organization | undefined {
-  return organizations.find((o) => o.slug === slug);
+export async function getOrganizationBySlug(slug: string): Promise<Organization | undefined> {
+  const { data } = await db().from("organizations").select("*").eq("slug", slug).maybeSingle();
+  return data ? mapOrganization(data) : undefined;
 }
 
-export function createCourt(organizationId: string, input: {
+export async function createCourt(organizationId: string, input: {
   name: string;
   sport: Sport;
   surface: CourtSurface;
@@ -919,47 +289,37 @@ export function createCourt(organizationId: string, input: {
   openTime: string;
   closeTime: string;
   basePrice: number;
-}): Court {
-  const id = `court_${courtSeq++}`;
+}): Promise<Court> {
   const rules = input.sport === "padel" ? weekdayPadelRules(input.basePrice) : weekdayFutbolRules(input.basePrice);
-  const court: Court = {
-    id,
-    organizationId,
-    name: input.name,
-    sport: input.sport,
-    surface: input.surface,
-    indoor: input.indoor,
-    lighting: input.lighting,
-    slotMinutes: input.slotMinutes,
-    openTime: input.openTime,
-    closeTime: input.closeTime,
-    daysOpen: [0, 1, 2, 3, 4, 5, 6],
-    priceRules: withRuleIds(id, rules),
-    active: true,
-  };
-  courts.push(court);
-  return court;
+  return insertCourtWithRules(organizationId, input, rules);
 }
 
-export function findOrCreateGuestCustomer(organizationId: string, input: { name: string; email: string; phone: string }): Customer {
-  const existing = customers.find(
-    (c) => c.organizationId === organizationId && c.email.toLowerCase() === input.email.trim().toLowerCase()
-  );
+export async function findOrCreateGuestCustomer(organizationId: string, input: { name: string; email: string; phone: string }): Promise<Customer> {
+  const { data: existing } = await db()
+    .from("customers")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .ilike("email", input.email.trim())
+    .maybeSingle();
+
   if (existing) {
-    existing.name = input.name || existing.name;
-    existing.phone = input.phone || existing.phone;
-    return existing;
+    const { data: updated, error } = await db()
+      .from("customers")
+      .update({ name: input.name || existing.name, phone: input.phone || existing.phone })
+      .eq("id", existing.id)
+      .select()
+      .single();
+    must(updated, error);
+    return mapCustomer(updated);
   }
-  const customer: Customer = {
-    id: `cust_${customerSeq++}`,
-    organizationId,
-    name: input.name,
-    email: input.email,
-    phone: input.phone,
-    loyaltyPoints: 0,
-  };
-  customers.push(customer);
-  return customer;
+
+  const { data, error } = await db()
+    .from("customers")
+    .insert({ organization_id: organizationId, name: input.name, email: input.email, phone: input.phone })
+    .select()
+    .single();
+  must(data, error);
+  return mapCustomer(data);
 }
 
 // ---- Superadmin (cross-tenant) --------------------------------------------
@@ -967,8 +327,10 @@ export function findOrCreateGuestCustomer(organizationId: string, input: { name:
 // es la única parte de la app pensada para ver todos los tenants a la vez.
 // Nunca se deben usar desde una página del panel de un dueño de cancha.
 
-export function listOrganizations(): Organization[] {
-  return [...organizations].sort((a, b) => a.name.localeCompare(b.name));
+export async function listOrganizations(): Promise<Organization[]> {
+  const { data, error } = await db().from("organizations").select("*").order("name");
+  if (error) throw error;
+  return (data ?? []).map(mapOrganization);
 }
 
 export interface OrgSummary {
@@ -979,17 +341,25 @@ export interface OrgSummary {
   bookingCount: number;
 }
 
-export function listOrgSummaries(): OrgSummary[] {
-  return listOrganizations().map((organization) => {
-    const owner = employees.find((e) => e.organizationId === organization.id && e.role === "owner");
-    return {
-      organization,
-      ownerEmail: owner?.email ?? organization.billingEmail ?? "—",
-      employeeCount: employees.filter((e) => e.organizationId === organization.id).length,
-      courtCount: courts.filter((c) => c.organizationId === organization.id).length,
-      bookingCount: bookings.filter((b) => b.organizationId === organization.id).length,
-    };
-  });
+export async function listOrgSummaries(): Promise<OrgSummary[]> {
+  const organizations = await listOrganizations();
+  return Promise.all(
+    organizations.map(async (organization) => {
+      const [{ data: owner }, { count: employeeCount }, { count: courtCount }, { count: bookingCount }] = await Promise.all([
+        db().from("employees").select("email").eq("organization_id", organization.id).eq("role", "owner").maybeSingle(),
+        db().from("employees").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
+        db().from("courts").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
+        db().from("bookings").select("id", { count: "exact", head: true }).eq("organization_id", organization.id),
+      ]);
+      return {
+        organization,
+        ownerEmail: owner?.email ?? organization.billingEmail ?? "—",
+        employeeCount: employeeCount ?? 0,
+        courtCount: courtCount ?? 0,
+        bookingCount: bookingCount ?? 0,
+      };
+    })
+  );
 }
 
 export interface PlatformStats {
@@ -1003,7 +373,8 @@ export interface PlatformStats {
   planDistribution: { planId: PlanId; count: number }[];
 }
 
-export function getPlatformStats(): PlatformStats {
+export async function getPlatformStats(): Promise<PlatformStats> {
+  const organizations = await listOrganizations();
   const byStatus = (status: SubscriptionStatus) => organizations.filter((o) => o.subscriptionStatus === status).length;
   const trialsEndingSoon = organizations.filter((o) => {
     if (o.subscriptionStatus !== "trialing" || !o.trialEndsAt) return false;
@@ -1030,48 +401,32 @@ export function getPlatformStats(): PlatformStats {
   };
 }
 
-export function adminChangePlan(organizationId: string, planId: PlanId): Organization {
-  const organization = getOrganizationById(organizationId);
-  if (!organization) throw new Error("Organización no encontrada");
-  organization.plan = planId;
-  return organization;
+export async function adminChangePlan(organizationId: string, planId: PlanId): Promise<Organization> {
+  const { data, error } = await db().from("organizations").update({ plan: planId }).eq("id", organizationId).select().single();
+  return mapOrganization(must(data, error, "Organización no encontrada"));
 }
 
-export function adminSetSubscriptionStatus(organizationId: string, status: SubscriptionStatus): Organization {
-  const organization = getOrganizationById(organizationId);
-  if (!organization) throw new Error("Organización no encontrada");
-  organization.subscriptionStatus = status;
-  return organization;
+export async function adminSetSubscriptionStatus(organizationId: string, status: SubscriptionStatus): Promise<Organization> {
+  const { data, error } = await db().from("organizations").update({ subscription_status: status }).eq("id", organizationId).select().single();
+  return mapOrganization(must(data, error, "Organización no encontrada"));
 }
 
 // ---------------------------------------------------------------------------
-// Read queries (tenant-scoped: siempre reciben organizationId)
+// Billing / acceso por plan
 // ---------------------------------------------------------------------------
 
-export function listPlans(): Plan[] {
-  return PLANS;
-}
-
-export function getPlan(planId: PlanId): Plan | undefined {
-  return PLANS.find((p) => p.id === planId);
-}
-
-export function priceInArs(priceUSD: number): number {
-  return priceUSD * USD_TO_ARS;
-}
-
-export function listBillingInvoices(organizationId: string): BillingInvoice[] {
-  return billingInvoices
-    .filter((i) => i.organizationId === organizationId)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+export async function listBillingInvoices(organizationId: string): Promise<BillingInvoice[]> {
+  const { data, error } = await db().from("billing_invoices").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapBillingInvoice);
 }
 
 export type AccessState =
   | { blocked: false; trialDaysLeft?: number }
   | { blocked: true; reason: "trial_expired" | "canceled" | "past_due" };
 
-export function computeAccessState(organizationId: string): AccessState {
-  const org = getOrganizationById(organizationId);
+export async function computeAccessState(organizationId: string): Promise<AccessState> {
+  const org = await getOrganizationById(organizationId);
   if (!org) return { blocked: true, reason: "canceled" };
   if (org.subscriptionStatus === "canceled") return { blocked: true, reason: "canceled" };
   if (org.subscriptionStatus === "past_due") return { blocked: true, reason: "past_due" };
@@ -1088,64 +443,133 @@ export function computeAccessState(organizationId: string): AccessState {
   return { blocked: false };
 }
 
-export function hasFeatureAccess(organizationId: string, group: PlanFeatureGroup): boolean {
-  const org = getOrganizationById(organizationId);
+export async function hasFeatureAccess(organizationId: string, group: PlanFeatureGroup): Promise<boolean> {
+  const org = await getOrganizationById(organizationId);
   const plan = org ? getPlan(org.plan) : undefined;
   return plan ? plan.featureGroups.includes(group) : false;
 }
 
-export function listEmployees(organizationId: string): Employee[] {
-  return employees.filter((e) => e.organizationId === organizationId);
+// ---------------------------------------------------------------------------
+// Empleados
+// ---------------------------------------------------------------------------
+
+export async function listEmployees(organizationId: string): Promise<Employee[]> {
+  const { data, error } = await db().from("employees").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapEmployee);
 }
 
-export function getEmployeeById(organizationId: string, employeeId: string): Employee | undefined {
-  return employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
+export async function getEmployeeById(organizationId: string, employeeId: string): Promise<Employee | undefined> {
+  const { data } = await db().from("employees").select("*").eq("id", employeeId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapEmployee(data) : undefined;
 }
 
-export function listCourts(organizationId: string): Court[] {
-  return courts.filter((c) => c.organizationId === organizationId);
+export async function addEmployee(organizationId: string, actorEmployeeId: string, input: { name: string; email: string; role: EmployeeRole; password: string }): Promise<Employee> {
+  const { data: authUser, error: authError } = await db().auth.admin.createUser({
+    email: input.email,
+    password: input.password,
+    email_confirm: true,
+  });
+  if (authError) {
+    throw new Error(authError.message.includes("already been registered") ? "Ya existe un usuario con ese email" : authError.message);
+  }
+
+  const { data, error } = await db()
+    .from("employees")
+    .insert({ organization_id: organizationId, user_id: authUser.user.id, name: input.name, email: input.email, role: input.role })
+    .select()
+    .single();
+  if (error) {
+    await db().auth.admin.deleteUser(authUser.user.id);
+    throw error;
+  }
+  const employee = mapEmployee(data);
+  await logAudit(organizationId, actorEmployeeId, "Empleado agregado", `${employee.name} (${employee.role})`);
+  return employee;
 }
 
-export function getCourt(organizationId: string, courtId: string): Court | undefined {
-  return courts.find((c) => c.id === courtId && c.organizationId === organizationId);
+export async function updateEmployeeRole(organizationId: string, actorEmployeeId: string, employeeId: string, role: EmployeeRole): Promise<Employee> {
+  const { data, error } = await db().from("employees").update({ role }).eq("id", employeeId).eq("organization_id", organizationId).select().single();
+  const employee = mapEmployee(must(data, error, "Empleado no encontrado"));
+  await logAudit(organizationId, actorEmployeeId, "Rol actualizado", `${employee.name} ahora es ${role}`);
+  return employee;
 }
 
-export function listCustomers(organizationId: string): Customer[] {
-  return customers.filter((c) => c.organizationId === organizationId);
+export async function setEmployeeActive(organizationId: string, actorEmployeeId: string, employeeId: string, active: boolean): Promise<Employee> {
+  const { data, error } = await db().from("employees").update({ active }).eq("id", employeeId).eq("organization_id", organizationId).select().single();
+  const employee = mapEmployee(must(data, error, "Empleado no encontrado"));
+  await logAudit(organizationId, actorEmployeeId, active ? "Empleado reactivado" : "Empleado desactivado", employee.name);
+  return employee;
 }
 
-export function getCustomer(organizationId: string, customerId: string): Customer | undefined {
-  return customers.find((c) => c.id === customerId && c.organizationId === organizationId);
+// ---------------------------------------------------------------------------
+// Canchas, clientes, reservas
+// ---------------------------------------------------------------------------
+
+const COURT_SELECT = "*, court_price_rules(*)";
+const BOOKING_SELECT = "*, booking_payments(*)";
+
+export async function listCourts(organizationId: string): Promise<Court[]> {
+  const { data, error } = await db().from("courts").select(COURT_SELECT).eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapCourt);
 }
 
-export function listBookings(organizationId: string): Booking[] {
-  return bookings.filter((b) => b.organizationId === organizationId);
+export async function getCourt(organizationId: string, courtId: string): Promise<Court | undefined> {
+  const { data } = await db().from("courts").select(COURT_SELECT).eq("id", courtId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapCourt(data) : undefined;
 }
 
-export function listBookingsForDate(organizationId: string, dateISO: string): Booking[] {
-  return bookings.filter((b) => b.organizationId === organizationId && b.date === dateISO);
+export async function listCustomers(organizationId: string): Promise<Customer[]> {
+  const { data, error } = await db().from("customers").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapCustomer);
 }
 
-export function listBookingsForCourtAndDate(organizationId: string, courtId: string, dateISO: string): Booking[] {
-  return bookings.filter((b) => b.organizationId === organizationId && b.courtId === courtId && b.date === dateISO);
+export async function getCustomer(organizationId: string, customerId: string): Promise<Customer | undefined> {
+  const { data } = await db().from("customers").select("*").eq("id", customerId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapCustomer(data) : undefined;
 }
 
-export function listBookingsForCustomer(organizationId: string, customerId: string): Booking[] {
-  return bookings
-    .filter((b) => b.organizationId === organizationId && b.customerId === customerId)
-    .sort((a, b) => (a.date + a.startTime < b.date + b.startTime ? 1 : -1));
+export async function listBookings(organizationId: string): Promise<Booking[]> {
+  const { data, error } = await db().from("bookings").select(BOOKING_SELECT).eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapBooking);
 }
 
-export function getBooking(organizationId: string, bookingId: string): Booking | undefined {
-  return bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
+export async function listBookingsForDate(organizationId: string, dateISO: string): Promise<Booking[]> {
+  const { data, error } = await db().from("bookings").select(BOOKING_SELECT).eq("organization_id", organizationId).eq("date", dateISO);
+  if (error) throw error;
+  return (data ?? []).map(mapBooking);
 }
 
-export function getSlotsForCourt(organizationId: string, courtId: string, dateISO: string) {
-  const court = getCourt(organizationId, courtId);
+export async function listBookingsForCourtAndDate(organizationId: string, courtId: string, dateISO: string): Promise<Booking[]> {
+  const { data, error } = await db().from("bookings").select(BOOKING_SELECT)
+    .eq("organization_id", organizationId).eq("court_id", courtId).eq("date", dateISO);
+  if (error) throw error;
+  return (data ?? []).map(mapBooking);
+}
+
+export async function listBookingsForCustomer(organizationId: string, customerId: string): Promise<Booking[]> {
+  const { data, error } = await db().from("bookings").select(BOOKING_SELECT)
+    .eq("organization_id", organizationId).eq("customer_id", customerId);
+  if (error) throw error;
+  return (data ?? []).map(mapBooking).sort((a, b) => (a.date + a.startTime < b.date + b.startTime ? 1 : -1));
+}
+
+export async function getBooking(organizationId: string, bookingId: string): Promise<Booking | undefined> {
+  const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("id", bookingId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapBooking(data) : undefined;
+}
+
+export async function getSlotsForCourt(organizationId: string, courtId: string, dateISO: string) {
+  const court = await getCourt(organizationId, courtId);
   if (!court) return [];
 
-  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
-  const orgPromotions = promotions.filter((p) => p.organizationId === organizationId);
+  const [orgBookings, orgPromotions] = await Promise.all([
+    listBookings(organizationId),
+    listPromotions(organizationId),
+  ]);
 
   return generateSlots(court, dateISO, orgBookings).map((slot) => {
     const promotion = findApplicablePromotion(orgPromotions, court, dateISO, slot.startTime);
@@ -1154,133 +578,719 @@ export function getSlotsForCourt(organizationId: string, courtId: string, dateIS
   });
 }
 
-export function listProductCategories(organizationId: string): ProductCategory[] {
-  return productCategories.filter((c) => c.organizationId === organizationId);
+function listSlotStarts(court: Court, dateISO: string): string[] {
+  if (!court.daysOpen.includes(dayOfWeek(dateISO))) return [];
+  const open = timeToMinutes(court.openTime);
+  const close = timeToMinutes(court.closeTime);
+  const starts: string[] = [];
+  for (let t = open; t + court.slotMinutes <= close; t += court.slotMinutes) {
+    starts.push(minutesToTime(t));
+  }
+  return starts;
 }
 
-export function listProducts(organizationId: string): Product[] {
-  return products.filter((p) => p.organizationId === organizationId);
+export async function isSlotAvailable(organizationId: string, courtId: string, date: string, startTime: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from("bookings")
+    .select("status")
+    .eq("organization_id", organizationId)
+    .eq("court_id", courtId)
+    .eq("date", date)
+    .eq("start_time", startTime);
+  if (error) throw error;
+  return !(data ?? []).some((b: { status: BookingStatus }) => BLOCKING_STATUSES.has(b.status));
 }
 
-export function getProduct(organizationId: string, productId: string): Product | undefined {
-  return products.find((p) => p.id === productId && p.organizationId === organizationId);
+export async function createPendingBooking(organizationId: string, input: {
+  courtId: string;
+  customerId: string;
+  date: string;
+  startTime: string;
+  recurringGroupId?: string;
+}): Promise<Booking> {
+  const court = await getCourt(organizationId, input.courtId);
+  if (!court) throw new Error("Cancha no encontrada");
+  if (!(await isSlotAvailable(organizationId, input.courtId, input.date, input.startTime))) {
+    throw new Error("Ese horario ya no está disponible");
+  }
+  const org = await getOrganizationById(organizationId);
+  if (!org) throw new Error("Organización no encontrada");
+
+  const endMinutes = timeToMinutes(input.startTime) + court.slotMinutes;
+  const basePrice = resolveSlotPrice(court, input.date, input.startTime);
+  const orgPromotions = await listPromotions(organizationId);
+  const promotion = findApplicablePromotion(orgPromotions, court, input.date, input.startTime);
+  const { finalPrice, discountLabel } = applyPromotion(basePrice, promotion);
+  const { depositAmount, balanceAmount } = computeDeposit(finalPrice, org);
+
+  const { data, error } = await db()
+    .from("bookings")
+    .insert({
+      organization_id: organizationId,
+      court_id: input.courtId,
+      customer_id: input.customerId,
+      date: input.date,
+      start_time: input.startTime,
+      end_time: minutesToTime(endMinutes),
+      total_price: finalPrice,
+      deposit_amount: depositAmount,
+      balance_amount: balanceAmount,
+      status: "pendiente_pago",
+      recurring_group_id: input.recurringGroupId,
+      discount_label: discountLabel,
+    })
+    .select(BOOKING_SELECT)
+    .single();
+  must(data, error);
+  return mapBooking(data);
 }
 
-export function listLowStockProducts(organizationId: string): Product[] {
-  return products.filter((p) => p.organizationId === organizationId && p.active && p.stock <= p.minStock);
-}
+export async function payDeposit(organizationId: string, bookingId: string, method: BookingPayment["method"] = "mercado_pago"): Promise<Booking> {
+  const booking = await getBooking(organizationId, bookingId);
+  if (!booking) throw new Error("Reserva no encontrada");
 
-export function listExpenses(organizationId: string): Expense[] {
-  return expenses.filter((e) => e.organizationId === organizationId).sort((a, b) => (a.date < b.date ? 1 : -1));
-}
+  const { error: payError } = await db().from("booking_payments").insert({
+    booking_id: bookingId,
+    concept: "sena",
+    amount: booking.depositAmount,
+    method,
+    status: "aprobado",
+  });
+  if (payError) throw payError;
 
-export function listExpensesForMonth(organizationId: string, yearMonth: string): Expense[] {
-  return listExpenses(organizationId).filter((e) => e.date.startsWith(yearMonth));
-}
+  const { data, error } = await db().from("bookings").update({ status: "sena_pagada" }).eq("id", bookingId).select(BOOKING_SELECT).single();
+  must(data, error);
+  const updated = mapBooking(data);
 
-export function getOpenCashSession(organizationId: string): CashRegisterSession | undefined {
-  return cashSessions.find((s) => s.organizationId === organizationId && s.status === "abierta");
-}
-
-export function listCashSessions(organizationId: string): CashRegisterSession[] {
-  return cashSessions
-    .filter((s) => s.organizationId === organizationId)
-    .sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1));
-}
-
-export function getCashSession(organizationId: string, sessionId: string): CashRegisterSession | undefined {
-  return cashSessions.find((s) => s.id === sessionId && s.organizationId === organizationId);
-}
-
-export function listCashMovements(organizationId: string, sessionId: string): CashMovement[] {
-  return cashMovements
-    .filter((m) => m.organizationId === organizationId && m.cashSessionId === sessionId)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export function listSales(organizationId: string): Sale[] {
-  return sales.filter((s) => s.organizationId === organizationId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export function listSalesForSession(organizationId: string, sessionId: string): Sale[] {
-  return sales.filter((s) => s.organizationId === organizationId && s.cashSessionId === sessionId);
-}
-
-export function listAuditLog(organizationId: string): AuditLogEntry[] {
-  return auditLog.filter((a) => a.organizationId === organizationId);
-}
-
-export function listPromotions(organizationId: string): Promotion[] {
-  return promotions.filter((p) => p.organizationId === organizationId);
-}
-
-export function listLoyaltyRewards(): LoyaltyReward[] {
-  return loyaltyRewards;
-}
-
-export function listLoyaltyRedemptions(organizationId: string, customerId: string): LoyaltyRedemption[] {
-  return loyaltyRedemptions.filter((r) => r.organizationId === organizationId && r.customerId === customerId);
-}
-
-export function listWaitlistForCustomer(organizationId: string, customerId: string): WaitlistEntry[] {
-  return waitlist.filter((w) => w.organizationId === organizationId && w.customerId === customerId);
-}
-
-export function listWaitlistForSlot(organizationId: string, courtId: string, date: string, startTime: string): WaitlistEntry[] {
-  return waitlist.filter(
-    (w) =>
-      w.organizationId === organizationId &&
-      w.courtId === courtId &&
-      w.date === date &&
-      w.startTime === startTime &&
-      w.status === "esperando"
+  await awardLoyaltyPoints(booking.customerId, booking.depositAmount);
+  const court = await getCourt(organizationId, booking.courtId);
+  await notify(
+    organizationId,
+    booking.customerId,
+    "reserva_confirmada",
+    `Tu reserva quedó confirmada para el ${booking.date} a las ${booking.startTime} en ${court?.name ?? "tu cancha"}.`
   );
+
+  return updated;
 }
 
-export function listNotifications(organizationId: string): NotificationEntry[] {
-  return notifications.filter((n) => n.organizationId === organizationId);
+export async function collectBalance(organizationId: string, employeeId: string, bookingId: string, method: BookingPayment["method"]): Promise<Booking> {
+  const booking = await getBooking(organizationId, bookingId);
+  if (!booking) throw new Error("Reserva no encontrada");
+
+  const { error: payError } = await db().from("booking_payments").insert({
+    booking_id: bookingId,
+    concept: "saldo",
+    amount: booking.balanceAmount,
+    method,
+    status: "aprobado",
+  });
+  if (payError) throw payError;
+
+  const { data, error } = await db().from("bookings").update({ status: "confirmada" }).eq("id", bookingId).select(BOOKING_SELECT).single();
+  must(data, error);
+  const updated = mapBooking(data);
+
+  const openSession = await getOpenCashSession(organizationId);
+  if (openSession) {
+    await db().from("cash_movements").insert({
+      organization_id: organizationId,
+      cash_session_id: openSession.id,
+      type: "cobro_reserva",
+      amount: booking.balanceAmount,
+      method,
+      concept: `Saldo reserva #${booking.id.slice(-6)}`,
+      employee_id: employeeId,
+    });
+  }
+  await logAudit(organizationId, employeeId, "Cobro de saldo", `Reserva #${booking.id.slice(-6)} — ${formatArs(booking.balanceAmount)} (${method})`);
+  await awardLoyaltyPoints(booking.customerId, booking.balanceAmount);
+
+  return updated;
 }
 
-export function listNotificationsForCustomer(organizationId: string, customerId: string): NotificationEntry[] {
-  return notifications.filter((n) => n.organizationId === organizationId && n.customerId === customerId);
+const AUDITED_STATUS_LABELS: Partial<Record<BookingStatus, string>> = {
+  cancelada: "Cancelación de reserva",
+  no_show: "No show registrado",
+  confirmada: "Reserva confirmada",
+  en_curso: "Turno iniciado",
+  finalizada: "Turno finalizado",
+};
+
+export async function updateBookingStatus(organizationId: string, employeeId: string, bookingId: string, status: BookingStatus): Promise<Booking> {
+  const existing = await getBooking(organizationId, bookingId);
+  if (!existing) throw new Error("Reserva no encontrada");
+
+  const { data, error } = await db().from("bookings").update({ status }).eq("id", bookingId).select(BOOKING_SELECT).single();
+  must(data, error);
+  const booking = mapBooking(data);
+
+  const label = AUDITED_STATUS_LABELS[status];
+  if (label) {
+    await logAudit(organizationId, employeeId, label, `Reserva #${booking.id.slice(-6)}`);
+  }
+
+  if (status === "cancelada") {
+    const court = await getCourt(organizationId, booking.courtId);
+    await notify(
+      organizationId,
+      booking.customerId,
+      "cancelacion",
+      `Se canceló tu reserva del ${booking.date} a las ${booking.startTime} en ${court?.name ?? "la cancha"}.`
+    );
+    await notifyWaitlist(organizationId, booking.courtId, booking.date, booking.startTime);
+  }
+
+  return booking;
 }
 
-export function listTournaments(organizationId: string): Tournament[] {
-  return tournaments.filter((t) => t.organizationId === organizationId).sort((a, b) => (a.date < b.date ? -1 : 1));
+async function notifyWaitlist(organizationId: string, courtId: string, date: string, startTime: string) {
+  const court = await getCourt(organizationId, courtId);
+  const { data: waiting, error } = await db()
+    .from("waitlist_entries")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("court_id", courtId)
+    .eq("date", date)
+    .eq("start_time", startTime)
+    .eq("status", "esperando");
+  if (error) throw error;
+
+  for (const entry of waiting ?? []) {
+    await db().from("waitlist_entries").update({ status: "notificado", notified_at: new Date().toISOString() }).eq("id", entry.id);
+    await notify(
+      organizationId,
+      entry.customer_id,
+      "lista_espera_liberada",
+      `¡Se liberó tu horario en ${court?.name ?? "la cancha"} el ${date} a las ${startTime}! Reservalo antes de que se lo lleve otro.`
+    );
+  }
 }
 
-export function getTournament(organizationId: string, tournamentId: string): Tournament | undefined {
-  return tournaments.find((t) => t.id === tournamentId && t.organizationId === organizationId);
+export async function createRecurringBooking(organizationId: string, input: {
+  courtId: string;
+  customerId: string;
+  startDate: string;
+  startTime: string;
+  weeks: number;
+}) {
+  const groupId = `rec_${Date.now()}`;
+  const created: Booking[] = [];
+  const skipped: string[] = [];
+
+  for (let i = 0; i < input.weeks; i++) {
+    const date = addDaysISO(input.startDate, i * 7);
+    if (!(await isSlotAvailable(organizationId, input.courtId, date, input.startTime))) {
+      skipped.push(date);
+      continue;
+    }
+    const booking = await createPendingBooking(organizationId, {
+      courtId: input.courtId,
+      customerId: input.customerId,
+      date,
+      startTime: input.startTime,
+      recurringGroupId: groupId,
+    });
+    await payDeposit(organizationId, booking.id, "mercado_pago");
+    created.push(booking);
+  }
+
+  return { created, skipped };
 }
 
-export function listTeamsForTournament(tournamentId: string): TournamentTeam[] {
-  return tournamentTeams.filter((t) => t.tournamentId === tournamentId);
+export async function joinWaitlist(organizationId: string, customerId: string, courtId: string, date: string, startTime: string): Promise<WaitlistEntry> {
+  const { data: existing } = await db()
+    .from("waitlist_entries")
+    .select("*")
+    .eq("organization_id", organizationId).eq("customer_id", customerId).eq("court_id", courtId)
+    .eq("date", date).eq("start_time", startTime).eq("status", "esperando")
+    .maybeSingle();
+  if (existing) return mapWaitlistEntry(existing);
+
+  const { data, error } = await db()
+    .from("waitlist_entries")
+    .insert({ organization_id: organizationId, customer_id: customerId, court_id: courtId, date, start_time: startTime })
+    .select()
+    .single();
+  must(data, error);
+  return mapWaitlistEntry(data);
 }
 
-export function getTeam(teamId: string): TournamentTeam | undefined {
-  return tournamentTeams.find((t) => t.id === teamId);
+export async function listWaitlistForCustomer(organizationId: string, customerId: string): Promise<WaitlistEntry[]> {
+  const { data, error } = await db().from("waitlist_entries").select("*").eq("organization_id", organizationId).eq("customer_id", customerId);
+  if (error) throw error;
+  return (data ?? []).map(mapWaitlistEntry);
 }
 
-export function listMatchesForTournament(tournamentId: string): TournamentMatch[] {
-  return tournamentMatches
-    .filter((m) => m.tournamentId === tournamentId)
-    .sort((a, b) => a.round - b.round || a.matchIndex - b.matchIndex);
+export async function listWaitlistForSlot(organizationId: string, courtId: string, date: string, startTime: string): Promise<WaitlistEntry[]> {
+  const { data, error } = await db().from("waitlist_entries").select("*")
+    .eq("organization_id", organizationId).eq("court_id", courtId).eq("date", date).eq("start_time", startTime).eq("status", "esperando");
+  if (error) throw error;
+  return (data ?? []).map(mapWaitlistEntry);
 }
 
-export function computeRanking(organizationId: string): RankingEntry[] {
-  const orgTournamentIds = new Set(tournaments.filter((t) => t.organizationId === organizationId).map((t) => t.id));
+// ---------------------------------------------------------------------------
+// Productos, inventario, caja/POS, gastos, auditoría
+// ---------------------------------------------------------------------------
+
+export async function listProductCategories(organizationId: string): Promise<ProductCategory[]> {
+  const { data, error } = await db().from("product_categories").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapProductCategory);
+}
+
+export async function listProducts(organizationId: string): Promise<Product[]> {
+  const { data, error } = await db().from("products").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapProduct);
+}
+
+export async function getProduct(organizationId: string, productId: string): Promise<Product | undefined> {
+  const { data } = await db().from("products").select("*").eq("id", productId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapProduct(data) : undefined;
+}
+
+export async function listLowStockProducts(organizationId: string): Promise<Product[]> {
+  const products = await listProducts(organizationId);
+  return products.filter((p) => p.active && p.stock <= p.minStock);
+}
+
+export async function adjustStock(organizationId: string, employeeId: string, productId: string, delta: number, reason: string): Promise<Product> {
+  const product = await getProduct(organizationId, productId);
+  if (!product) throw new Error("Producto no encontrado");
+  const newStock = Math.max(0, product.stock + delta);
+  const { data, error } = await db().from("products").update({ stock: newStock }).eq("id", productId).select().single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Ajuste de stock", `${product.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`);
+  return mapProduct(data);
+}
+
+export async function listExpenses(organizationId: string): Promise<Expense[]> {
+  const { data, error } = await db().from("expenses").select("*").eq("organization_id", organizationId).order("date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapExpense);
+}
+
+export async function listExpensesForMonth(organizationId: string, yearMonth: string): Promise<Expense[]> {
+  const expenses = await listExpenses(organizationId);
+  return expenses.filter((e) => e.date.startsWith(yearMonth));
+}
+
+export async function addExpense(organizationId: string, input: {
+  employeeId: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  date: string;
+}): Promise<Expense> {
+  const { data, error } = await db().from("expenses").insert({
+    organization_id: organizationId,
+    employee_id: input.employeeId,
+    category: input.category,
+    description: input.description,
+    amount: input.amount,
+    date: input.date,
+  }).select().single();
+  must(data, error);
+  const expense = mapExpense(data);
+
+  const openSession = await getOpenCashSession(organizationId);
+  if (openSession && expense.date === todayISO()) {
+    await db().from("cash_movements").insert({
+      organization_id: organizationId,
+      cash_session_id: openSession.id,
+      type: "gasto",
+      amount: -expense.amount,
+      method: "efectivo",
+      concept: expense.description,
+      employee_id: input.employeeId,
+    });
+  }
+
+  await logAudit(organizationId, input.employeeId, "Gasto registrado", `${expense.description} — ${formatArs(expense.amount)}`);
+  return expense;
+}
+
+export async function getOpenCashSession(organizationId: string): Promise<CashRegisterSession | undefined> {
+  const { data } = await db().from("cash_registers").select("*").eq("organization_id", organizationId).eq("status", "abierta").maybeSingle();
+  return data ? mapCashSession(data) : undefined;
+}
+
+export async function listCashSessions(organizationId: string): Promise<CashRegisterSession[]> {
+  const { data, error } = await db().from("cash_registers").select("*").eq("organization_id", organizationId).order("opened_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapCashSession);
+}
+
+export async function getCashSession(organizationId: string, sessionId: string): Promise<CashRegisterSession | undefined> {
+  const { data } = await db().from("cash_registers").select("*").eq("id", sessionId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapCashSession(data) : undefined;
+}
+
+export async function listCashMovements(organizationId: string, sessionId: string): Promise<CashMovement[]> {
+  const { data, error } = await db().from("cash_movements").select("*")
+    .eq("organization_id", organizationId).eq("cash_session_id", sessionId).order("created_at");
+  if (error) throw error;
+  return (data ?? []).map(mapCashMovement);
+}
+
+export async function openCashSession(organizationId: string, employeeId: string, openingAmount: number): Promise<CashRegisterSession> {
+  if (await getOpenCashSession(organizationId)) throw new Error("Ya hay una caja abierta");
+  const { data, error } = await db().from("cash_registers").insert({
+    organization_id: organizationId, employee_id: employeeId, status: "abierta", opening_amount: openingAmount,
+  }).select().single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Apertura de caja", `Monto inicial ${formatArs(openingAmount)}`);
+  return mapCashSession(data);
+}
+
+export async function closeCashSession(organizationId: string, employeeId: string, sessionId: string, countedAmount: number): Promise<CashRegisterSession> {
+  const { data, error } = await db().from("cash_registers").update({
+    status: "cerrada", closing_counted_amount: countedAmount, closed_at: new Date().toISOString(),
+  }).eq("id", sessionId).eq("organization_id", organizationId).select().single();
+  const session = mapCashSession(must(data, error, "Caja no encontrada"));
+  await logAudit(organizationId, employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(countedAmount)} contados`);
+  return session;
+}
+
+export async function listSales(organizationId: string): Promise<Sale[]> {
+  const { data, error } = await db().from("sales").select("*, sale_items(*)").eq("organization_id", organizationId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapSale);
+}
+
+export async function listSalesForSession(organizationId: string, sessionId: string): Promise<Sale[]> {
+  const { data, error } = await db().from("sales").select("*, sale_items(*)").eq("organization_id", organizationId).eq("cash_session_id", sessionId);
+  if (error) throw error;
+  return (data ?? []).map(mapSale);
+}
+
+export async function createSale(organizationId: string, input: {
+  employeeId: string;
+  items: { productId: string; quantity: number }[];
+  method: PaymentMethod;
+}): Promise<Sale> {
+  const openSession = await getOpenCashSession(organizationId);
+  if (!openSession) throw new Error("No hay una caja abierta");
+  if (input.items.length === 0) throw new Error("La venta no tiene productos");
+
+  const items: SaleItem[] = [];
+  for (const { productId, quantity } of input.items) {
+    const product = await getProduct(organizationId, productId);
+    if (!product) throw new Error("Producto no encontrado");
+    if (product.stock < quantity) throw new Error(`Stock insuficiente de ${product.name}`);
+    items.push({ productId, name: product.name, quantity, unitPrice: product.price });
+    await db().from("products").update({ stock: product.stock - quantity }).eq("id", productId);
+  }
+
+  const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const { data: saleRow, error } = await db().from("sales").insert({
+    organization_id: organizationId, cash_session_id: openSession.id, employee_id: input.employeeId, total, method: input.method,
+  }).select().single();
+  must(saleRow, error);
+
+  await db().from("sale_items").insert(
+    items.map((it) => ({ sale_id: saleRow.id, product_id: it.productId, name: it.name, quantity: it.quantity, unit_price: it.unitPrice }))
+  );
+
+  await db().from("cash_movements").insert({
+    organization_id: organizationId,
+    cash_session_id: openSession.id,
+    type: "venta",
+    amount: total,
+    method: input.method,
+    concept: items.map((it) => `${it.quantity}x ${it.name}`).join(", "),
+    employee_id: input.employeeId,
+    created_at: saleRow.created_at,
+  });
+
+  await logAudit(organizationId, input.employeeId, "Venta registrada", `${formatArs(total)} — ${items.map((it) => it.name).join(", ")}`);
+  return { ...mapSale(saleRow), items };
+}
+
+export async function listAuditLog(organizationId: string): Promise<AuditLogEntry[]> {
+  const { data, error } = await db().from("audit_logs").select("*, employees(name)").eq("organization_id", organizationId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapAuditLog);
+}
+
+async function logAudit(organizationId: string, employeeId: string | null, action: string, detail: string) {
+  await db().from("audit_logs").insert({ organization_id: organizationId, employee_id: employeeId, action, detail });
+}
+
+// ---------------------------------------------------------------------------
+// Promociones, fidelización, lista de espera, notificaciones
+// ---------------------------------------------------------------------------
+
+export async function listPromotions(organizationId: string): Promise<Promotion[]> {
+  const { data, error } = await db().from("promotions").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapPromotion);
+}
+
+export async function createPromotion(organizationId: string, actorEmployeeId: string, input: Omit<Promotion, "id" | "organizationId">): Promise<Promotion> {
+  const { data, error } = await db().from("promotions").insert({
+    organization_id: organizationId,
+    label: input.label,
+    discount_percentage: input.discountPercentage,
+    days_of_week: input.daysOfWeek,
+    start_time: input.startTime,
+    end_time: input.endTime,
+    sports: input.sports,
+    active: input.active,
+  }).select().single();
+  must(data, error);
+  const promotion = mapPromotion(data);
+  await logAudit(organizationId, actorEmployeeId, "Promoción creada", `${promotion.label} (-${Math.round(promotion.discountPercentage * 100)}%)`);
+  return promotion;
+}
+
+export async function setPromotionActive(organizationId: string, actorEmployeeId: string, promotionId: string, active: boolean): Promise<Promotion> {
+  const { data, error } = await db().from("promotions").update({ active }).eq("id", promotionId).eq("organization_id", organizationId).select().single();
+  const promotion = mapPromotion(must(data, error, "Promoción no encontrada"));
+  await logAudit(organizationId, actorEmployeeId, active ? "Promoción activada" : "Promoción desactivada", promotion.label);
+  return promotion;
+}
+
+export async function listLoyaltyRewards(organizationId: string): Promise<LoyaltyReward[]> {
+  const { data, error } = await db().from("loyalty_rewards").select("*").eq("organization_id", organizationId);
+  if (error) throw error;
+  return (data ?? []).map(mapLoyaltyReward);
+}
+
+export async function listLoyaltyRedemptions(organizationId: string, customerId: string): Promise<LoyaltyRedemption[]> {
+  const { data, error } = await db().from("loyalty_redemptions").select("*, loyalty_rewards(label)")
+    .eq("organization_id", organizationId).eq("customer_id", customerId);
+  if (error) throw error;
+  return (data ?? []).map(mapLoyaltyRedemption);
+}
+
+async function awardLoyaltyPoints(customerId: string, amountSpent: number) {
+  const { data: customer } = await db().from("customers").select("loyalty_points").eq("id", customerId).maybeSingle();
+  if (!customer) return;
+  await db().from("customers").update({ loyalty_points: customer.loyalty_points + Math.floor(amountSpent / 100) }).eq("id", customerId);
+}
+
+export async function redeemLoyaltyReward(organizationId: string, customerId: string, rewardId: string): Promise<LoyaltyRedemption> {
+  const { data: customer } = await db().from("customers").select("*").eq("id", customerId).eq("organization_id", organizationId).maybeSingle();
+  if (!customer) throw new Error("Cliente no encontrado");
+  const { data: reward } = await db().from("loyalty_rewards").select("*").eq("id", rewardId).maybeSingle();
+  if (!reward) throw new Error("Beneficio no encontrado");
+  if (customer.loyalty_points < reward.points_cost) throw new Error("No tenés puntos suficientes");
+
+  await db().from("customers").update({ loyalty_points: customer.loyalty_points - reward.points_cost }).eq("id", customerId);
+
+  const { data, error } = await db().from("loyalty_redemptions").insert({
+    organization_id: organizationId, customer_id: customerId, reward_id: rewardId, points_spent: reward.points_cost,
+  }).select("*, loyalty_rewards(label)").single();
+  must(data, error);
+  await logAudit(organizationId, null, "Canje de puntos", `${customer.name} canjeó "${reward.label}"`);
+  return mapLoyaltyRedemption(data);
+}
+
+export async function listNotifications(organizationId: string): Promise<NotificationEntry[]> {
+  const { data, error } = await db().from("notifications").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapNotification);
+}
+
+export async function listNotificationsForCustomer(organizationId: string, customerId: string): Promise<NotificationEntry[]> {
+  const { data, error } = await db().from("notifications").select("*")
+    .eq("organization_id", organizationId).eq("customer_id", customerId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapNotification);
+}
+
+async function notify(organizationId: string, customerId: string, kind: NotificationKind, message: string, channel: NotificationChannel = "whatsapp") {
+  await db().from("notifications").insert({ organization_id: organizationId, customer_id: customerId, channel, kind, message });
+}
+
+// ---------------------------------------------------------------------------
+// Torneos y ranking
+// ---------------------------------------------------------------------------
+
+export async function listTournaments(organizationId: string): Promise<Tournament[]> {
+  const { data, error } = await db().from("tournaments").select("*").eq("organization_id", organizationId).order("date");
+  if (error) throw error;
+  return (data ?? []).map(mapTournament);
+}
+
+export async function getTournament(organizationId: string, tournamentId: string): Promise<Tournament | undefined> {
+  const { data } = await db().from("tournaments").select("*").eq("id", tournamentId).eq("organization_id", organizationId).maybeSingle();
+  return data ? mapTournament(data) : undefined;
+}
+
+export async function listTeamsForTournament(tournamentId: string): Promise<TournamentTeam[]> {
+  const { data, error } = await db().from("tournament_teams").select("*").eq("tournament_id", tournamentId);
+  if (error) throw error;
+  return (data ?? []).map(mapTournamentTeam);
+}
+
+export async function getTeam(teamId: string): Promise<TournamentTeam | undefined> {
+  const { data } = await db().from("tournament_teams").select("*").eq("id", teamId).maybeSingle();
+  return data ? mapTournamentTeam(data) : undefined;
+}
+
+export async function listMatchesForTournament(tournamentId: string): Promise<TournamentMatch[]> {
+  const { data, error } = await db().from("tournament_matches").select("*").eq("tournament_id", tournamentId).order("round").order("match_index");
+  if (error) throw error;
+  return (data ?? []).map(mapTournamentMatch);
+}
+
+export async function createTournament(
+  organizationId: string,
+  actorEmployeeId: string,
+  input: Omit<Tournament, "id" | "organizationId" | "status" | "createdAt">
+): Promise<Tournament> {
+  const { data, error } = await db().from("tournaments").insert({
+    organization_id: organizationId,
+    name: input.name,
+    sport: input.sport,
+    category: input.category,
+    date: input.date,
+    max_teams: input.maxTeams,
+    entry_fee: input.entryFee,
+    prize: input.prize,
+    status: "inscripcion",
+  }).select().single();
+  must(data, error);
+  const tournament = mapTournament(data);
+  await logAudit(organizationId, actorEmployeeId, "Torneo creado", tournament.name);
+  return tournament;
+}
+
+export async function registerTeam(organizationId: string, input: {
+  tournamentId: string;
+  name: string;
+  playerNames: string[];
+  customerId?: string;
+}): Promise<TournamentTeam> {
+  const tournament = await getTournament(organizationId, input.tournamentId);
+  if (!tournament) throw new Error("Torneo no encontrado");
+  if (tournament.status !== "inscripcion") throw new Error("La inscripción ya cerró");
+
+  const currentTeams = await listTeamsForTournament(input.tournamentId);
+  if (currentTeams.length >= tournament.maxTeams) throw new Error("No hay cupos disponibles");
+
+  const { data, error } = await db().from("tournament_teams").insert({
+    tournament_id: input.tournamentId,
+    name: input.name,
+    player_names: input.playerNames,
+    customer_id: input.customerId,
+    paid_entry: true,
+  }).select().single();
+  must(data, error);
+  const team = mapTournamentTeam(data);
+  await logAudit(organizationId, null, "Equipo inscripto", `${team.name} en ${tournament.name}`);
+
+  if (input.customerId) {
+    await notify(organizationId, input.customerId, "torneo_inscripcion", `Inscribimos a "${team.name}" en ${tournament.name}. ¡Nos vemos el ${tournament.date}!`);
+  }
+  return team;
+}
+
+function bracketSize(teamCount: number): number {
+  let size = 2;
+  while (size < teamCount) size *= 2;
+  return size;
+}
+
+async function propagateWinner(tournamentId: string, match: TournamentMatch) {
+  if (!match.winnerTeamId) return;
+  const nextRound = match.round + 1;
+  const nextIndex = Math.floor(match.matchIndex / 2);
+  const { data: nextMatch } = await db().from("tournament_matches").select("*")
+    .eq("tournament_id", tournamentId).eq("round", nextRound).eq("match_index", nextIndex).maybeSingle();
+  if (!nextMatch) return; // era la final
+  const field = match.matchIndex % 2 === 0 ? "team_a_id" : "team_b_id";
+  await db().from("tournament_matches").update({ [field]: match.winnerTeamId }).eq("id", nextMatch.id);
+}
+
+export async function generateBracket(organizationId: string, actorEmployeeId: string, tournamentId: string): Promise<TournamentMatch[]> {
+  const tournament = await getTournament(organizationId, tournamentId);
+  if (!tournament) throw new Error("Torneo no encontrado");
+  const teams = await listTeamsForTournament(tournamentId);
+  if (teams.length < 2) throw new Error("Necesitás al menos 2 equipos para generar el cuadro");
+  const existingMatches = await listMatchesForTournament(tournamentId);
+  if (existingMatches.length > 0) throw new Error("El cuadro ya fue generado");
+
+  const size = bracketSize(teams.length);
+  const rounds = Math.log2(size);
+  const slots: (string | undefined)[] = teams.map((t) => t.id);
+  while (slots.length < size) slots.push(undefined);
+
+  const round1Rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < size / 2; i++) {
+    const teamAId = slots[i * 2];
+    const teamBId = slots[i * 2 + 1];
+    const onlyOne = (teamAId && !teamBId) || (!teamAId && teamBId);
+    round1Rows.push({
+      tournament_id: tournamentId, round: 1, match_index: i,
+      team_a_id: teamAId ?? null, team_b_id: teamBId ?? null,
+      status: onlyOne ? "bye" : "pendiente",
+      winner_team_id: onlyOne ? (teamAId ?? teamBId) : null,
+    });
+  }
+  const otherRoundRows: Record<string, unknown>[] = [];
+  let prevRoundCount = size / 2;
+  for (let r = 2; r <= rounds; r++) {
+    const count = prevRoundCount / 2;
+    for (let i = 0; i < count; i++) otherRoundRows.push({ tournament_id: tournamentId, round: r, match_index: i, status: "pendiente" });
+    prevRoundCount = count;
+  }
+
+  const { data: inserted, error } = await db().from("tournament_matches").insert([...round1Rows, ...otherRoundRows]).select();
+  if (error) throw error;
+  const allMatches = (inserted ?? []).map(mapTournamentMatch);
+
+  for (const m of allMatches.filter((m) => m.status === "bye")) {
+    await propagateWinner(tournamentId, m);
+  }
+
+  await db().from("tournaments").update({ status: "en_curso" }).eq("id", tournamentId);
+  await logAudit(organizationId, actorEmployeeId, "Cuadro generado", `${tournament.name} — ${teams.length} equipos`);
+  return listMatchesForTournament(tournamentId);
+}
+
+export async function recordMatchResult(organizationId: string, actorEmployeeId: string, matchId: string, winnerTeamId: string, scoreLabel?: string): Promise<TournamentMatch> {
+  const { data: matchRow } = await db().from("tournament_matches").select("*").eq("id", matchId).maybeSingle();
+  if (!matchRow) throw new Error("Partido no encontrado");
+  const match = mapTournamentMatch(matchRow);
+  const tournament = await getTournament(organizationId, match.tournamentId);
+  if (!tournament) throw new Error("Torneo no encontrado");
+  if (!match.teamAId || !match.teamBId) throw new Error("Todavía faltan equipos para este partido");
+  if (winnerTeamId !== match.teamAId && winnerTeamId !== match.teamBId) throw new Error("Equipo inválido");
+
+  const { data, error } = await db().from("tournament_matches").update({
+    winner_team_id: winnerTeamId, score_label: scoreLabel, status: "jugado",
+  }).eq("id", matchId).select().single();
+  must(data, error);
+  const updated = mapTournamentMatch(data);
+  await propagateWinner(match.tournamentId, updated);
+
+  const { count: nextRoundCount } = await db().from("tournament_matches").select("id", { count: "exact", head: true })
+    .eq("tournament_id", match.tournamentId).eq("round", match.round + 1);
+  if (!nextRoundCount) await db().from("tournaments").update({ status: "finalizado" }).eq("id", tournament.id);
+
+  const winner = await getTeam(winnerTeamId);
+  await logAudit(organizationId, actorEmployeeId, "Resultado cargado", `${winner?.name ?? winnerTeamId} ganó (ronda ${match.round})`);
+  return updated;
+}
+
+export async function computeRanking(organizationId: string): Promise<RankingEntry[]> {
+  const tournaments = await listTournaments(organizationId);
+  const allMatches = (await Promise.all(tournaments.map((t) => listMatchesForTournament(t.id)))).flat();
+  const allTeams = (await Promise.all(tournaments.map((t) => listTeamsForTournament(t.id)))).flat();
 
   const roundsByTournament = new Map<string, number>();
-  for (const m of tournamentMatches) {
-    if (!orgTournamentIds.has(m.tournamentId)) continue;
+  for (const m of allMatches) {
     roundsByTournament.set(m.tournamentId, Math.max(roundsByTournament.get(m.tournamentId) ?? 0, m.round));
   }
 
   const pointsMap = new Map<string, RankingEntry>();
-  for (const m of tournamentMatches) {
-    if (!orgTournamentIds.has(m.tournamentId)) continue;
+  for (const m of allMatches) {
     if (m.status !== "jugado" || !m.winnerTeamId) continue;
-    const team = tournamentTeams.find((t) => t.id === m.winnerTeamId);
+    const team = allTeams.find((t) => t.id === m.winnerTeamId);
     if (!team) continue;
     const isFinal = m.round === roundsByTournament.get(m.tournamentId);
 
@@ -1296,12 +1306,7 @@ export function computeRanking(organizationId: string): RankingEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Fase 4 — Inteligencia: analítica, predicción de demanda, alertas
-//
-// Todo lo de acá abajo son vistas derivadas de datos que ya existen (bookings,
-// expenses, sales, tournamentTeams) — no agregan estado nuevo. Usan los 35
-// días de historial + 21 de caja sembrados en seedBookings/seedCashHistory
-// para tener algo real sobre lo que calcular tendencias.
+// Analítica (Fase 4) — vistas derivadas de bookings/expenses/sales/torneos.
 // ---------------------------------------------------------------------------
 
 const HOUR_BANDS = [
@@ -1318,8 +1323,6 @@ function hourBandFor(startTime: string) {
 
 const WEEKDAY_LABELS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-// Todo lo que no sea "cancelada" cuenta como demanda real de ese horario
-// (un no-show igual ocupó el turno y perdió la seña).
 const DEMAND_STATUSES = new Set<BookingStatus>([
   "pendiente_pago", "sena_pagada", "confirmada", "en_curso", "finalizada", "no_show",
 ]);
@@ -1337,12 +1340,11 @@ function countPossibleSlots(court: Court, dates: string[]): number {
   return dates.reduce((sum, date) => sum + listSlotStarts(court, date).length, 0);
 }
 
-export function computeCourtRevenueRanking(organizationId: string) {
+export async function computeCourtRevenueRanking(organizationId: string) {
   const dates = new Set(historicalDateRange());
-  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
-  const historical = bookings.filter(
-    (b) => b.organizationId === organizationId && dates.has(b.date) && DEMAND_STATUSES.has(b.status)
-  );
+  const [courts, bookings] = await Promise.all([listCourts(organizationId), listBookings(organizationId)]);
+  const orgCourts = courts.filter((c) => c.active);
+  const historical = bookings.filter((b) => dates.has(b.date) && DEMAND_STATUSES.has(b.status));
 
   return orgCourts
     .map((court) => {
@@ -1354,12 +1356,11 @@ export function computeCourtRevenueRanking(organizationId: string) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
-export function computeHourBandStats(organizationId: string) {
+export async function computeHourBandStats(organizationId: string) {
   const dates = new Set(historicalDateRange());
-  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
-  const historical = bookings.filter(
-    (b) => b.organizationId === organizationId && dates.has(b.date) && DEMAND_STATUSES.has(b.status)
-  );
+  const [courts, bookings] = await Promise.all([listCourts(organizationId), listBookings(organizationId)]);
+  const orgCourts = courts.filter((c) => c.active);
+  const historical = bookings.filter((b) => dates.has(b.date) && DEMAND_STATUSES.has(b.status));
 
   return HOUR_BANDS.map((band) => {
     const inBand = historical.filter((b) => hourBandFor(b.startTime).label === band.label);
@@ -1375,12 +1376,11 @@ export function computeHourBandStats(organizationId: string) {
   });
 }
 
-export function computeWeekdayStats(organizationId: string) {
+export async function computeWeekdayStats(organizationId: string) {
   const dates = historicalDateRange();
-  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
-  const historical = bookings.filter(
-    (b) => b.organizationId === organizationId && dates.includes(b.date) && DEMAND_STATUSES.has(b.status)
-  );
+  const [courts, bookings] = await Promise.all([listCourts(organizationId), listBookings(organizationId)]);
+  const orgCourts = courts.filter((c) => c.active);
+  const historical = bookings.filter((b) => dates.includes(b.date) && DEMAND_STATUSES.has(b.status));
 
   return WEEKDAY_LABELS.map((label, dow) => {
     const datesForDow = dates.filter((d) => dayOfWeek(d) === dow);
@@ -1400,15 +1400,11 @@ export interface DemandRecommendation {
   sampleSize: number;
 }
 
-// Combinaciones cancha + día + franja horaria con más baja ocupación
-// histórica (con al menos `minSamples` turnos posibles, para no recomendar
-// en base a 1 sola fecha). Pensado para alimentar "creá una promo acá".
-export function computeLowDemandRecommendations(organizationId: string, limit = 3): DemandRecommendation[] {
+export async function computeLowDemandRecommendations(organizationId: string, limit = 3): Promise<DemandRecommendation[]> {
   const dates = historicalDateRange();
-  const orgCourts = courts.filter((c) => c.organizationId === organizationId && c.active);
-  const historical = bookings.filter(
-    (b) => b.organizationId === organizationId && dates.includes(b.date) && DEMAND_STATUSES.has(b.status)
-  );
+  const [courts, bookings] = await Promise.all([listCourts(organizationId), listBookings(organizationId)]);
+  const orgCourts = courts.filter((c) => c.active);
+  const historical = bookings.filter((b) => dates.includes(b.date) && DEMAND_STATUSES.has(b.status));
 
   const buckets = new Map<string, { court: Court; dow: number; band: string; possible: number; taken: number }>();
   for (const court of orgCourts) {
@@ -1443,633 +1439,115 @@ export function computeLowDemandRecommendations(organizationId: string, limit = 
     .slice(0, limit);
 }
 
-export function computeHighDemandBand(organizationId: string): DemandRecommendation | undefined {
-  const recs = computeLowDemandRecommendations(organizationId, 1000);
+export async function computeHighDemandBand(organizationId: string): Promise<DemandRecommendation | undefined> {
+  const recs = await computeLowDemandRecommendations(organizationId, 1000);
   if (recs.length === 0) return undefined;
   return [...recs].sort((a, b) => b.occupancyPct - a.occupancyPct)[0];
 }
 
-export function computePaymentMethodTotals(organizationId: string) {
+export async function computePaymentMethodTotals(organizationId: string) {
+  const [bookings, sales] = await Promise.all([listBookings(organizationId), listSales(organizationId)]);
   const totals = new Map<PaymentMethod, number>();
-  for (const b of bookings.filter((b) => b.organizationId === organizationId)) {
+  for (const b of bookings) {
     for (const p of b.payments) totals.set(p.method, (totals.get(p.method) ?? 0) + p.amount);
   }
-  for (const s of sales.filter((s) => s.organizationId === organizationId)) {
+  for (const s of sales) {
     totals.set(s.method, (totals.get(s.method) ?? 0) + s.total);
   }
   return [...totals.entries()].map(([method, amount]) => ({ method, amount })).sort((a, b) => b.amount - a.amount);
 }
 
-export function computeRevenueByCategory(organizationId: string) {
-  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
-  const orgSales = sales.filter((s) => s.organizationId === organizationId);
-  const orgTournaments = tournaments.filter((t) => t.organizationId === organizationId);
+export async function computeRevenueByCategory(organizationId: string) {
+  const [bookings, sales, tournaments] = await Promise.all([
+    listBookings(organizationId), listSales(organizationId), listTournaments(organizationId),
+  ]);
 
-  const canchas = orgBookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
-  const productos = orgSales.reduce((sum, s) => sum + s.total, 0);
-  const torneos = orgTournaments.reduce((sum, t) => {
-    const registered = tournamentTeams.filter((team) => team.tournamentId === t.id && team.paidEntry).length;
-    return sum + registered * t.entryFee;
-  }, 0);
+  const canchas = bookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
+  const productos = sales.reduce((sum, s) => sum + s.total, 0);
+  let torneos = 0;
+  for (const t of tournaments) {
+    const teams = await listTeamsForTournament(t.id);
+    torneos += teams.filter((team) => team.paidEntry).length * t.entryFee;
+  }
   return { canchas, productos, torneos, total: canchas + productos + torneos };
 }
 
-export function computeProfitAndLoss(organizationId: string) {
-  const { total: ingresos } = computeRevenueByCategory(organizationId);
-  const gastos = expenses.filter((e) => e.organizationId === organizationId).reduce((sum, e) => sum + e.amount, 0);
+export async function computeProfitAndLoss(organizationId: string) {
+  const [{ total: ingresos }, expenses] = await Promise.all([computeRevenueByCategory(organizationId), listExpenses(organizationId)]);
+  const gastos = expenses.reduce((sum, e) => sum + e.amount, 0);
   return { ingresos, gastos, resultado: ingresos - gastos, margin: ingresos ? (ingresos - gastos) / ingresos : 0 };
 }
 
-export function computeDailyRevenue(organizationId: string, days = 14) {
+export async function computeDailyRevenue(organizationId: string, days = 14) {
   const today = todayISO();
+  const [bookings, sales] = await Promise.all([listBookings(organizationId), listSales(organizationId)]);
   const result: { date: string; canchas: number; productos: number; total: number }[] = [];
-  const orgBookings = bookings.filter((b) => b.organizationId === organizationId);
-  const orgSales = sales.filter((s) => s.organizationId === organizationId);
 
   for (let offset = -(days - 1); offset <= 0; offset++) {
     const date = addDaysISO(today, offset);
-    const canchas = orgBookings
+    const canchas = bookings
       .flatMap((b) => b.payments)
       .filter((p) => p.paidAt.startsWith(date))
       .reduce((sum, p) => sum + p.amount, 0);
-    const productos = orgSales.filter((s) => s.createdAt.startsWith(date)).reduce((sum, s) => sum + s.total, 0);
+    const productos = sales.filter((s) => s.createdAt.startsWith(date)).reduce((sum, s) => sum + s.total, 0);
     result.push({ date, canchas, productos, total: canchas + productos });
   }
   return result;
 }
 
 // ---------------------------------------------------------------------------
-// Mutations (mock — swap for Supabase inserts/updates later)
-// ---------------------------------------------------------------------------
-
-export function isSlotAvailable(organizationId: string, courtId: string, date: string, startTime: string): boolean {
-  return !bookings.some(
-    (b) =>
-      b.organizationId === organizationId &&
-      b.courtId === courtId &&
-      b.date === date &&
-      b.startTime === startTime &&
-      BLOCKING_STATUSES.has(b.status)
-  );
-}
-
-export function createPendingBooking(organizationId: string, input: {
-  courtId: string;
-  customerId: string;
-  date: string;
-  startTime: string;
-  recurringGroupId?: string;
-}): Booking {
-  const court = getCourt(organizationId, input.courtId);
-  if (!court) throw new Error("Cancha no encontrada");
-  if (!isSlotAvailable(organizationId, input.courtId, input.date, input.startTime)) {
-    throw new Error("Ese horario ya no está disponible");
-  }
-  const org = getOrganizationById(organizationId);
-  if (!org) throw new Error("Organización no encontrada");
-
-  const endMinutes = timeToMinutes(input.startTime) + court.slotMinutes;
-  const basePrice = resolveSlotPrice(court, input.date, input.startTime);
-  const orgPromotions = promotions.filter((p) => p.organizationId === organizationId);
-  const promotion = findApplicablePromotion(orgPromotions, court, input.date, input.startTime);
-  const { finalPrice, discountLabel } = applyPromotion(basePrice, promotion);
-  const { depositAmount, balanceAmount } = computeDeposit(finalPrice, org);
-
-  const booking: Booking = {
-    id: `bk_manual_${bookingSeq++}`,
-    organizationId,
-    courtId: input.courtId,
-    customerId: input.customerId,
-    date: input.date,
-    startTime: input.startTime,
-    endTime: minutesToTime(endMinutes),
-    totalPrice: finalPrice,
-    depositAmount,
-    balanceAmount,
-    status: "pendiente_pago",
-    payments: [],
-    createdAt: new Date().toISOString(),
-    recurringGroupId: input.recurringGroupId,
-    discountLabel,
-  };
-  bookings.push(booking);
-  return booking;
-}
-
-export function payDeposit(organizationId: string, bookingId: string, method: BookingPayment["method"] = "mercado_pago"): Booking {
-  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
-  if (!booking) throw new Error("Reserva no encontrada");
-
-  booking.payments.push({
-    id: `pay_${bookingId}_sena_${Date.now()}`,
-    bookingId,
-    concept: "sena",
-    amount: booking.depositAmount,
-    method,
-    status: "aprobado",
-    paidAt: new Date().toISOString(),
-  });
-  booking.status = "sena_pagada";
-  awardLoyaltyPoints(booking.customerId, booking.depositAmount);
-
-  const court = getCourt(organizationId, booking.courtId);
-  notify(
-    organizationId,
-    booking.customerId,
-    "reserva_confirmada",
-    `Tu reserva quedó confirmada para el ${booking.date} a las ${booking.startTime} en ${court?.name ?? "tu cancha"}.`
-  );
-
-  return booking;
-}
-
-export function collectBalance(organizationId: string, employeeId: string, bookingId: string, method: BookingPayment["method"]): Booking {
-  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
-  if (!booking) throw new Error("Reserva no encontrada");
-
-  booking.payments.push({
-    id: `pay_${bookingId}_saldo_${Date.now()}`,
-    bookingId,
-    concept: "saldo",
-    amount: booking.balanceAmount,
-    method,
-    status: "aprobado",
-    paidAt: new Date().toISOString(),
-  });
-  booking.status = "confirmada";
-
-  const openSession = getOpenCashSession(organizationId);
-  if (openSession) {
-    cashMovements.push({
-      id: `cmov_${cashMovementSeq++}`,
-      organizationId,
-      cashSessionId: openSession.id,
-      type: "cobro_reserva",
-      amount: booking.balanceAmount,
-      method,
-      concept: `Saldo reserva #${booking.id.slice(-6)}`,
-      employeeId,
-      createdAt: new Date().toISOString(),
-    });
-  }
-  logAudit(organizationId, employeeId, "Cobro de saldo", `Reserva #${booking.id.slice(-6)} — ${formatArs(booking.balanceAmount)} (${method})`);
-  awardLoyaltyPoints(booking.customerId, booking.balanceAmount);
-
-  return booking;
-}
-
-const AUDITED_STATUS_LABELS: Partial<Record<BookingStatus, string>> = {
-  cancelada: "Cancelación de reserva",
-  no_show: "No show registrado",
-  confirmada: "Reserva confirmada",
-  en_curso: "Turno iniciado",
-  finalizada: "Turno finalizado",
-};
-
-export function updateBookingStatus(organizationId: string, employeeId: string, bookingId: string, status: BookingStatus): Booking {
-  const booking = bookings.find((b) => b.id === bookingId && b.organizationId === organizationId);
-  if (!booking) throw new Error("Reserva no encontrada");
-  booking.status = status;
-
-  const label = AUDITED_STATUS_LABELS[status];
-  if (label) {
-    logAudit(organizationId, employeeId, label, `Reserva #${booking.id.slice(-6)}`);
-  }
-
-  if (status === "cancelada") {
-    const court = getCourt(organizationId, booking.courtId);
-    notify(
-      organizationId,
-      booking.customerId,
-      "cancelacion",
-      `Se canceló tu reserva del ${booking.date} a las ${booking.startTime} en ${court?.name ?? "la cancha"}.`
-    );
-    notifyWaitlist(organizationId, booking.courtId, booking.date, booking.startTime);
-  }
-
-  return booking;
-}
-
-function notifyWaitlist(organizationId: string, courtId: string, date: string, startTime: string) {
-  const court = getCourt(organizationId, courtId);
-  const waiting = waitlist.filter(
-    (w) =>
-      w.organizationId === organizationId &&
-      w.courtId === courtId &&
-      w.date === date &&
-      w.startTime === startTime &&
-      w.status === "esperando"
-  );
-  for (const entry of waiting) {
-    entry.status = "notificado";
-    entry.notifiedAt = new Date().toISOString();
-    notify(
-      organizationId,
-      entry.customerId,
-      "lista_espera_liberada",
-      `¡Se liberó tu horario en ${court?.name ?? "la cancha"} el ${date} a las ${startTime}! Reservalo antes de que se lo lleve otro.`
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Fase 2 mutations: inventario, caja/POS, gastos, empleados
-// ---------------------------------------------------------------------------
-
-export function adjustStock(organizationId: string, employeeId: string, productId: string, delta: number, reason: string): Product {
-  const product = products.find((p) => p.id === productId && p.organizationId === organizationId);
-  if (!product) throw new Error("Producto no encontrado");
-  product.stock = Math.max(0, product.stock + delta);
-  logAudit(organizationId, employeeId, "Ajuste de stock", `${product.name}: ${delta > 0 ? "+" : ""}${delta} (${reason})`);
-  return product;
-}
-
-export function openCashSession(organizationId: string, employeeId: string, openingAmount: number): CashRegisterSession {
-  if (getOpenCashSession(organizationId)) throw new Error("Ya hay una caja abierta");
-
-  const session: CashRegisterSession = {
-    id: `cash_${cashSessionSeq++}`,
-    organizationId,
-    employeeId,
-    status: "abierta",
-    openingAmount,
-    openedAt: new Date().toISOString(),
-  };
-  cashSessions.push(session);
-  logAudit(organizationId, employeeId, "Apertura de caja", `Monto inicial ${formatArs(openingAmount)}`);
-  return session;
-}
-
-export function closeCashSession(organizationId: string, employeeId: string, sessionId: string, countedAmount: number): CashRegisterSession {
-  const session = cashSessions.find((s) => s.id === sessionId && s.organizationId === organizationId);
-  if (!session) throw new Error("Caja no encontrada");
-
-  session.status = "cerrada";
-  session.closingCountedAmount = countedAmount;
-  session.closedAt = new Date().toISOString();
-  logAudit(organizationId, employeeId, "Cierre de caja", `Caja cerrada con ${formatArs(countedAmount)} contados`);
-  return session;
-}
-
-export function createSale(organizationId: string, input: {
-  employeeId: string;
-  items: { productId: string; quantity: number }[];
-  method: PaymentMethod;
-}): Sale {
-  const openSession = getOpenCashSession(organizationId);
-  if (!openSession) throw new Error("No hay una caja abierta");
-  if (input.items.length === 0) throw new Error("La venta no tiene productos");
-
-  const items: SaleItem[] = input.items.map(({ productId, quantity }) => {
-    const product = products.find((p) => p.id === productId && p.organizationId === organizationId);
-    if (!product) throw new Error("Producto no encontrado");
-    if (product.stock < quantity) throw new Error(`Stock insuficiente de ${product.name}`);
-    return { productId, name: product.name, quantity, unitPrice: product.price };
-  });
-
-  for (const item of items) {
-    const product = products.find((p) => p.id === item.productId)!;
-    product.stock -= item.quantity;
-  }
-
-  const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
-  const sale: Sale = {
-    id: `sale_${saleSeq++}`,
-    organizationId,
-    cashSessionId: openSession.id,
-    employeeId: input.employeeId,
-    items,
-    total,
-    method: input.method,
-    createdAt: new Date().toISOString(),
-  };
-  sales.push(sale);
-
-  cashMovements.push({
-    id: `cmov_${cashMovementSeq++}`,
-    organizationId,
-    cashSessionId: openSession.id,
-    type: "venta",
-    amount: total,
-    method: input.method,
-    concept: items.map((it) => `${it.quantity}x ${it.name}`).join(", "),
-    employeeId: input.employeeId,
-    createdAt: sale.createdAt,
-  });
-
-  logAudit(organizationId, input.employeeId, "Venta registrada", `${formatArs(total)} — ${sale.items.map((it) => it.name).join(", ")}`);
-  return sale;
-}
-
-export function addExpense(organizationId: string, input: {
-  employeeId: string;
-  category: ExpenseCategory;
-  description: string;
-  amount: number;
-  date: string;
-}): Expense {
-  const expense: Expense = {
-    id: `exp_${expenseSeq++}`,
-    organizationId,
-    ...input,
-    createdAt: new Date().toISOString(),
-  };
-  expenses.push(expense);
-
-  const openSession = getOpenCashSession(organizationId);
-  if (openSession && expense.date === todayISO()) {
-    cashMovements.push({
-      id: `cmov_${cashMovementSeq++}`,
-      organizationId,
-      cashSessionId: openSession.id,
-      type: "gasto",
-      amount: -expense.amount,
-      method: "efectivo",
-      concept: expense.description,
-      employeeId: input.employeeId,
-      createdAt: expense.createdAt,
-    });
-  }
-
-  logAudit(organizationId, input.employeeId, "Gasto registrado", `${expense.description} — ${formatArs(expense.amount)}`);
-  return expense;
-}
-
-export function addEmployee(organizationId: string, actorEmployeeId: string, input: { name: string; email: string; role: EmployeeRole; password: string }): Employee {
-  if (employees.some((e) => e.email.toLowerCase() === input.email.trim().toLowerCase())) {
-    throw new Error("Ya existe un usuario con ese email");
-  }
-  const employee: Employee = { id: `emp_${employeeSeq++}`, organizationId, active: true, ...input };
-  employees.push(employee);
-  logAudit(organizationId, actorEmployeeId, "Empleado agregado", `${employee.name} (${employee.role})`);
-  return employee;
-}
-
-export function updateEmployeeRole(organizationId: string, actorEmployeeId: string, employeeId: string, role: EmployeeRole): Employee {
-  const employee = employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
-  if (!employee) throw new Error("Empleado no encontrado");
-  employee.role = role;
-  logAudit(organizationId, actorEmployeeId, "Rol actualizado", `${employee.name} ahora es ${role}`);
-  return employee;
-}
-
-export function setEmployeeActive(organizationId: string, actorEmployeeId: string, employeeId: string, active: boolean): Employee {
-  const employee = employees.find((e) => e.id === employeeId && e.organizationId === organizationId);
-  if (!employee) throw new Error("Empleado no encontrado");
-  employee.active = active;
-  logAudit(organizationId, actorEmployeeId, active ? "Empleado reactivado" : "Empleado desactivado", employee.name);
-  return employee;
-}
-
-// ---------------------------------------------------------------------------
-// Fase 3 mutations: reservas recurrentes, lista de espera, fidelización,
-// promociones, torneos
-// ---------------------------------------------------------------------------
-
-export function createRecurringBooking(organizationId: string, input: {
-  courtId: string;
-  customerId: string;
-  startDate: string;
-  startTime: string;
-  weeks: number;
-}) {
-  const groupId = `rec_${Date.now()}`;
-  const created: Booking[] = [];
-  const skipped: string[] = [];
-
-  for (let i = 0; i < input.weeks; i++) {
-    const date = addDaysISO(input.startDate, i * 7);
-    if (!isSlotAvailable(organizationId, input.courtId, date, input.startTime)) {
-      skipped.push(date);
-      continue;
-    }
-    const booking = createPendingBooking(organizationId, {
-      courtId: input.courtId,
-      customerId: input.customerId,
-      date,
-      startTime: input.startTime,
-      recurringGroupId: groupId,
-    });
-    payDeposit(organizationId, booking.id, "mercado_pago");
-    created.push(booking);
-  }
-
-  return { created, skipped };
-}
-
-export function joinWaitlist(organizationId: string, customerId: string, courtId: string, date: string, startTime: string): WaitlistEntry {
-  const existing = waitlist.find(
-    (w) =>
-      w.organizationId === organizationId &&
-      w.customerId === customerId &&
-      w.courtId === courtId &&
-      w.date === date &&
-      w.startTime === startTime &&
-      w.status === "esperando"
-  );
-  if (existing) return existing;
-
-  const entry: WaitlistEntry = {
-    id: `wl_${waitlistSeq++}`,
-    organizationId,
-    customerId,
-    courtId,
-    date,
-    startTime,
-    status: "esperando",
-    createdAt: new Date().toISOString(),
-  };
-  waitlist.push(entry);
-  return entry;
-}
-
-export function redeemLoyaltyReward(organizationId: string, customerId: string, rewardId: string): LoyaltyRedemption {
-  const customer = customers.find((c) => c.id === customerId && c.organizationId === organizationId);
-  if (!customer) throw new Error("Cliente no encontrado");
-  const reward = loyaltyRewards.find((r) => r.id === rewardId);
-  if (!reward) throw new Error("Beneficio no encontrado");
-  if (customer.loyaltyPoints < reward.pointsCost) throw new Error("No tenés puntos suficientes");
-
-  customer.loyaltyPoints -= reward.pointsCost;
-  const redemption: LoyaltyRedemption = {
-    id: `redeem_${redemptionSeq++}`,
-    organizationId,
-    customerId,
-    rewardId,
-    rewardLabel: reward.label,
-    pointsSpent: reward.pointsCost,
-    createdAt: new Date().toISOString(),
-  };
-  loyaltyRedemptions.push(redemption);
-  logAudit(organizationId, null, "Canje de puntos", `${customer.name} canjeó "${reward.label}"`);
-  return redemption;
-}
-
-export function createPromotion(organizationId: string, actorEmployeeId: string, input: Omit<Promotion, "id" | "organizationId">): Promotion {
-  const promotion: Promotion = { id: `promo_${promotionSeq++}`, organizationId, ...input };
-  promotions.push(promotion);
-  logAudit(organizationId, actorEmployeeId, "Promoción creada", `${promotion.label} (-${Math.round(promotion.discountPercentage * 100)}%)`);
-  return promotion;
-}
-
-export function setPromotionActive(organizationId: string, actorEmployeeId: string, promotionId: string, active: boolean): Promotion {
-  const promotion = promotions.find((p) => p.id === promotionId && p.organizationId === organizationId);
-  if (!promotion) throw new Error("Promoción no encontrada");
-  promotion.active = active;
-  logAudit(organizationId, actorEmployeeId, active ? "Promoción activada" : "Promoción desactivada", promotion.label);
-  return promotion;
-}
-
-export function createTournament(
-  organizationId: string,
-  actorEmployeeId: string,
-  input: Omit<Tournament, "id" | "organizationId" | "status" | "createdAt">
-): Tournament {
-  const tournament: Tournament = {
-    id: `tourn_${tournamentSeq++}`,
-    organizationId,
-    status: "inscripcion",
-    createdAt: new Date().toISOString(),
-    ...input,
-  };
-  tournaments.push(tournament);
-  logAudit(organizationId, actorEmployeeId, "Torneo creado", tournament.name);
-  return tournament;
-}
-
-export function registerTeam(organizationId: string, input: {
-  tournamentId: string;
-  name: string;
-  playerNames: string[];
-  customerId?: string;
-}): TournamentTeam {
-  const tournament = tournaments.find((t) => t.id === input.tournamentId && t.organizationId === organizationId);
-  if (!tournament) throw new Error("Torneo no encontrado");
-  if (tournament.status !== "inscripcion") throw new Error("La inscripción ya cerró");
-
-  const currentTeams = tournamentTeams.filter((t) => t.tournamentId === input.tournamentId);
-  if (currentTeams.length >= tournament.maxTeams) throw new Error("No hay cupos disponibles");
-
-  const team: TournamentTeam = {
-    id: `tteam_${tournamentTeamSeq++}`,
-    tournamentId: input.tournamentId,
-    name: input.name,
-    playerNames: input.playerNames,
-    customerId: input.customerId,
-    paidEntry: true,
-    registeredAt: new Date().toISOString(),
-  };
-  tournamentTeams.push(team);
-  logAudit(organizationId, null, "Equipo inscripto", `${team.name} en ${tournament.name}`);
-
-  if (input.customerId) {
-    notify(
-      organizationId,
-      input.customerId,
-      "torneo_inscripcion",
-      `Inscribimos a "${team.name}" en ${tournament.name}. ¡Nos vemos el ${tournament.date}!`
-    );
-  }
-  return team;
-}
-
-export function generateBracket(organizationId: string, actorEmployeeId: string, tournamentId: string): TournamentMatch[] {
-  const tournament = tournaments.find((t) => t.id === tournamentId && t.organizationId === organizationId);
-  if (!tournament) throw new Error("Torneo no encontrado");
-  const teams = tournamentTeams.filter((t) => t.tournamentId === tournamentId);
-  if (teams.length < 2) throw new Error("Necesitás al menos 2 equipos para generar el cuadro");
-  if (tournamentMatches.some((m) => m.tournamentId === tournamentId)) {
-    throw new Error("El cuadro ya fue generado");
-  }
-
-  const matches = generateBracketInternal(tournamentId);
-  tournament.status = "en_curso";
-  logAudit(organizationId, actorEmployeeId, "Cuadro generado", `${tournament.name} — ${teams.length} equipos`);
-  return matches;
-}
-
-export function recordMatchResult(organizationId: string, actorEmployeeId: string, matchId: string, winnerTeamId: string, scoreLabel?: string): TournamentMatch {
-  const match = tournamentMatches.find((m) => m.id === matchId);
-  if (!match) throw new Error("Partido no encontrado");
-  const tournament = tournaments.find((t) => t.id === match.tournamentId && t.organizationId === organizationId);
-  if (!tournament) throw new Error("Torneo no encontrado");
-  if (!match.teamAId || !match.teamBId) throw new Error("Todavía faltan equipos para este partido");
-  if (winnerTeamId !== match.teamAId && winnerTeamId !== match.teamBId) throw new Error("Equipo inválido");
-
-  match.winnerTeamId = winnerTeamId;
-  match.scoreLabel = scoreLabel;
-  match.status = "jugado";
-  propagateWinner(match.tournamentId, match);
-
-  const hasNextRound = tournamentMatches.some(
-    (m) => m.tournamentId === match.tournamentId && m.round === match.round + 1
-  );
-  if (!hasNextRound) tournament.status = "finalizado";
-
-  const winner = tournamentTeams.find((t) => t.id === winnerTeamId);
-  logAudit(organizationId, actorEmployeeId, "Resultado cargado", `${winner?.name ?? winnerTeamId} ganó (ronda ${match.round})`);
-  return match;
-}
-
-// ---------------------------------------------------------------------------
 // SaaS mutations: cambio de plan, facturación de la propia cuenta
-// (`createOrganization`, más arriba, es lo que reemplaza al viejo
-// `startTrial` para el registro real de una cuenta nueva).
 // ---------------------------------------------------------------------------
 
-export function changePlan(organizationId: string, employeeId: string, planId: PlanId): Organization {
-  const organization = getOrganizationById(organizationId);
+export async function changePlan(organizationId: string, employeeId: string, planId: PlanId): Promise<Organization> {
+  const organization = await getOrganizationById(organizationId);
   if (!organization) throw new Error("Organización no encontrada");
   const previous = organization.plan;
-  organization.plan = planId;
-  logAudit(organizationId, employeeId, "Plan cambiado", `${previous} → ${planId}`);
-  return organization;
+  const { data, error } = await db().from("organizations").update({ plan: planId }).eq("id", organizationId).select().single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Plan cambiado", `${previous} → ${planId}`);
+  return mapOrganization(data);
 }
 
-// Simula el checkout de Mercado Pago Suscripciones: siempre aprobado, como el
-// resto de los pagos de esta demo. Reemplazar por la preferencia/webhook real
-// de MP cuando haya credenciales.
-export function activateSubscription(organizationId: string, employeeId: string, billingEmail: string): Organization {
-  const organization = getOrganizationById(organizationId);
+export async function activateSubscription(organizationId: string, employeeId: string, billingEmail: string): Promise<Organization> {
+  const organization = await getOrganizationById(organizationId);
   if (!organization) throw new Error("Organización no encontrada");
   const plan = getPlan(organization.plan);
   if (!plan) throw new Error("Plan inválido");
 
-  organization.subscriptionStatus = "active";
-  organization.billingEmail = billingEmail;
-  organization.trialEndsAt = undefined;
-  organization.currentPeriodEnd = addDaysISO(todayISO(), 30);
-  organization.mercadopagoSubscriptionId = organization.mercadopagoSubscriptionId ?? `mp_sub_${Date.now()}`;
+  const currentPeriodEnd = addDaysISO(todayISO(), 30);
+  const { data, error } = await db().from("organizations").update({
+    subscription_status: "active",
+    billing_email: billingEmail,
+    trial_ends_at: null,
+    current_period_end: currentPeriodEnd,
+    mercadopago_subscription_id: organization.mercadopagoSubscriptionId ?? `mp_sub_${Date.now()}`,
+  }).eq("id", organizationId).select().single();
+  must(data, error);
 
-  billingInvoices.push({
-    id: `inv_${billingInvoiceSeq++}`,
-    organizationId,
-    plan: plan.id,
-    amountUSD: plan.priceUSD,
-    status: "pagada",
-    periodStart: todayISO(),
-    periodEnd: organization.currentPeriodEnd,
-    createdAt: new Date().toISOString(),
+  await db().from("billing_invoices").insert({
+    organization_id: organizationId, plan: plan.id, amount_usd: plan.priceUSD, status: "pagada",
+    period_start: todayISO(), period_end: currentPeriodEnd,
   });
 
-  logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
+  await logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
+  return mapOrganization(data);
+}
+
+export async function cancelSubscription(organizationId: string, employeeId: string): Promise<Organization> {
+  const { data, error } = await db().from("organizations").update({ subscription_status: "canceled" }).eq("id", organizationId).select().single();
+  const organization = mapOrganization(must(data, error, "Organización no encontrada"));
+  await logAudit(organizationId, employeeId, "Suscripción cancelada", `Plan ${organization.plan}`);
   return organization;
 }
 
-export function cancelSubscription(organizationId: string, employeeId: string): Organization {
-  const organization = getOrganizationById(organizationId);
-  if (!organization) throw new Error("Organización no encontrada");
-  organization.subscriptionStatus = "canceled";
-  logAudit(organizationId, employeeId, "Suscripción cancelada", `Plan ${organization.plan}`);
-  return organization;
-}
-
-// Solo para poder mostrar en la demo cómo se ve el paywall sin esperar 7 días reales.
-export function simulateTrialExpired(organizationId: string): Organization {
-  const organization = getOrganizationById(organizationId);
+export async function simulateTrialExpired(organizationId: string): Promise<Organization> {
+  const organization = await getOrganizationById(organizationId);
   if (!organization) throw new Error("Organización no encontrada");
   if (organization.subscriptionStatus === "trialing") {
-    organization.trialEndsAt = addDaysISO(todayISO(), -1);
+    const { data, error } = await db().from("organizations").update({ trial_ends_at: addDaysISO(todayISO(), -1) }).eq("id", organizationId).select().single();
+    must(data, error);
+    return mapOrganization(data);
   }
   return organization;
 }

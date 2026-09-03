@@ -7,7 +7,7 @@ import { EmployeeRowActions } from "./employee-row-actions";
 
 export default async function EmpleadosPage() {
   const { organizationId } = await requireEmployeeSession();
-  const employees = listEmployees(organizationId);
+  const employees = await listEmployees(organizationId);
 
   return (
     <div>

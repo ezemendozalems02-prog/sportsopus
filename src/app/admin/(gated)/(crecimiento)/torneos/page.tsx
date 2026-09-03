@@ -14,7 +14,13 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default async function TorneosAdminPage() {
   const { organizationId } = await requireEmployeeSession();
-  const tournaments = listTournaments(organizationId);
+  const tournaments = await listTournaments(organizationId);
+  const tournamentsWithTeams = await Promise.all(
+    tournaments.map(async (tournament) => ({
+      tournament,
+      teams: await listTeamsForTournament(tournament.id),
+    }))
+  );
 
   return (
     <div>
@@ -25,8 +31,7 @@ export default async function TorneosAdminPage() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {tournaments.map((tournament) => {
-          const teams = listTeamsForTournament(tournament.id);
+        {tournamentsWithTeams.map(({ tournament, teams }) => {
           const revenue = teams.length * tournament.entryFee;
           return (
             <Link key={tournament.id} href={`/admin/torneos/${tournament.id}`}>
@@ -53,7 +58,7 @@ export default async function TorneosAdminPage() {
             </Link>
           );
         })}
-        {tournaments.length === 0 && (
+        {tournamentsWithTeams.length === 0 && (
           <Card>
             <p className="text-sm text-zinc-400">No hay torneos creados.</p>
           </Card>

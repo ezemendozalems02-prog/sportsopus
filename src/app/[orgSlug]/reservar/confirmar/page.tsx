@@ -16,21 +16,22 @@ export default async function ConfirmarPage({
   searchParams: Promise<{ courtId?: string; date?: string; startTime?: string }>;
 }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
   const { courtId, date, startTime } = await searchParams;
   if (!courtId || !date || !startTime) redirect(`/${orgSlug}/reservar`);
 
-  const court = getCourt(org.id, courtId);
+  const court = await getCourt(org.id, courtId);
   if (!court) redirect(`/${orgSlug}/reservar`);
 
   const basePrice = resolveSlotPrice(court, date, startTime);
-  const promotion = findApplicablePromotion(listPromotions(org.id), court, date, startTime);
+  const promotions = await listPromotions(org.id);
+  const promotion = findApplicablePromotion(promotions, court, date, startTime);
   const { finalPrice: totalPrice, discountLabel } = applyPromotion(basePrice, promotion);
   const { depositAmount, balanceAmount } = computeDeposit(totalPrice, org);
   const existingSession = await getCustomerSession(org.id);
-  const existingCustomer = existingSession ? getCustomer(org.id, existingSession.customerId) : undefined;
+  const existingCustomer = existingSession ? await getCustomer(org.id, existingSession.customerId) : undefined;
 
   return (
     <div>

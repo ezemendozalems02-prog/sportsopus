@@ -33,14 +33,12 @@ import {
   simulateTrialExpired,
   updateBookingStatus,
   updateEmployeeRole,
-  verifyEmployeeCredentials,
   verifyPlatformAdminCredentials,
 } from "./db";
 import {
   clearEmployeeSession,
   clearSuperadminSession,
   getCustomerSession,
-  newSessionToken,
   requireEmployeeSession,
   requireSuperadminSession,
   setCustomerSession,
@@ -62,9 +60,8 @@ import type {
 type GuestContact = { name: string; email: string; phone: string };
 
 async function identifyGuest(organizationId: string, contact: GuestContact) {
-  const customer = findOrCreateGuestCustomer(organizationId, contact);
-  const token = newSessionToken({ kind: "customer", customerId: customer.id, organizationId });
-  await setCustomerSession(organizationId, token);
+  const customer = await findOrCreateGuestCustomer(organizationId, contact);
+  await setCustomerSession(organizationId, customer.id);
   return customer;
 }
 
@@ -77,10 +74,11 @@ function revalidateEverywhere() {
 // ---------------------------------------------------------------------------
 
 export async function loginAction(email: string, password: string): Promise<{ error: string } | void> {
-  const employee = verifyEmployeeCredentials(email, password);
-  if (!employee) return { error: "Email o contraseña incorrectos" };
-  const token = newSessionToken({ kind: "employee", employeeId: employee.id, organizationId: employee.organizationId });
-  await setEmployeeSession(token);
+  try {
+    await setEmployeeSession(email, password);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "No se pudo iniciar sesión" };
+  }
   redirect("/admin");
 }
 
@@ -96,28 +94,25 @@ export async function signupAction(input: {
   ownerPassword: string;
   planId: PlanId;
 }): Promise<{ error: string } | void> {
-  let organization, owner;
   try {
-    ({ organization, owner } = createOrganization({
+    await createOrganization({
       name: input.orgName,
       ownerName: input.ownerName,
       ownerEmail: input.ownerEmail,
       ownerPassword: input.ownerPassword,
       planId: input.planId,
-    }));
+    });
+    await setEmployeeSession(input.ownerEmail, input.ownerPassword);
   } catch (e) {
     return { error: e instanceof Error ? e.message : "No se pudo crear la cuenta" };
   }
-  const token = newSessionToken({ kind: "employee", employeeId: owner.id, organizationId: organization.id });
-  await setEmployeeSession(token);
   redirect("/admin");
 }
 
 export async function superadminLoginAction(email: string, password: string): Promise<{ error: string } | void> {
   const admin = verifyPlatformAdminCredentials(email, password);
   if (!admin) return { error: "Email o contraseña incorrectos" };
-  const token = newSessionToken({ kind: "superadmin", adminId: admin.id });
-  await setSuperadminSession(token);
+  await setSuperadminSession(admin.id);
   redirect("/superadmin");
 }
 
@@ -146,7 +141,7 @@ export async function reserveSlotAction(input: {
   revalidateEverywhere();
 
   if (input.weeks && input.weeks > 1) {
-    const { created, skipped } = createRecurringBooking(input.organizationId, {
+    const { created, skipped } = await createRecurringBooking(input.organizationId, {
       courtId: input.courtId,
       customerId: customer.id,
       startDate: input.date,
@@ -157,19 +152,19 @@ export async function reserveSlotAction(input: {
     return { bookingId: created[0].id, createdCount: created.length, skippedDates: skipped };
   }
 
-  const booking = createPendingBooking(input.organizationId, {
+  const booking = await createPendingBooking(input.organizationId, {
     courtId: input.courtId,
     customerId: customer.id,
     date: input.date,
     startTime: input.startTime,
   });
-  payDeposit(input.organizationId, booking.id, "mercado_pago");
+  await payDeposit(input.organizationId, booking.id, "mercado_pago");
   return { bookingId: booking.id, createdCount: 1, skippedDates: [] };
 }
 
 export async function collectBalanceAction(bookingId: string, method: BookingPayment["method"]) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  collectBalance(organizationId, employeeId, bookingId, method);
+  await collectBalance(organizationId, employeeId, bookingId, method);
   revalidatePath("/admin/agenda");
   revalidatePath("/admin");
   revalidatePath("/admin/caja");
@@ -178,7 +173,7 @@ export async function collectBalanceAction(bookingId: string, method: BookingPay
 
 export async function setBookingStatusAction(bookingId: string, status: BookingStatus) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  updateBookingStatus(organizationId, employeeId, bookingId, status);
+  await updateBookingStatus(organizationId, employeeId, bookingId, status);
   revalidatePath("/admin/agenda");
   revalidatePath("/admin");
   revalidatePath("/admin/auditoria");
@@ -190,14 +185,14 @@ export async function setBookingStatusAction(bookingId: string, status: BookingS
 
 export async function openCashSessionAction(openingAmount: number) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  openCashSession(organizationId, employeeId, openingAmount);
+  await openCashSession(organizationId, employeeId, openingAmount);
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
 
 export async function closeCashSessionAction(sessionId: string, countedAmount: number) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  closeCashSession(organizationId, employeeId, sessionId, countedAmount);
+  await closeCashSession(organizationId, employeeId, sessionId, countedAmount);
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
@@ -207,7 +202,7 @@ export async function createSaleAction(input: {
   method: PaymentMethod;
 }) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  const sale = createSale(organizationId, { employeeId, items: input.items, method: input.method });
+  const sale = await createSale(organizationId, { employeeId, items: input.items, method: input.method });
 
   revalidatePath("/admin/caja");
   revalidatePath("/admin/inventario");
@@ -219,7 +214,7 @@ export async function createSaleAction(input: {
 
 export async function adjustStockAction(productId: string, delta: number, reason: string) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  adjustStock(organizationId, employeeId, productId, delta, reason);
+  await adjustStock(organizationId, employeeId, productId, delta, reason);
   revalidatePath("/admin/inventario");
   revalidatePath("/admin/auditoria");
 }
@@ -236,7 +231,7 @@ export async function createCourtAction(input: {
   basePrice: number;
 }) {
   const { organizationId } = await requireEmployeeSession();
-  createCourt(organizationId, input);
+  await createCourt(organizationId, input);
   revalidatePath("/admin/canchas");
 }
 
@@ -247,30 +242,34 @@ export async function addExpenseAction(input: {
   date: string;
 }) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  addExpense(organizationId, { ...input, employeeId });
+  await addExpense(organizationId, { ...input, employeeId });
 
   revalidatePath("/admin/gastos");
   revalidatePath("/admin/caja");
   revalidatePath("/admin/auditoria");
 }
 
-export async function addEmployeeAction(input: { name: string; email: string; role: EmployeeRole; password: string }) {
+export async function addEmployeeAction(input: { name: string; email: string; role: EmployeeRole; password: string }): Promise<{ error: string } | void> {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  addEmployee(organizationId, employeeId, input);
+  try {
+    await addEmployee(organizationId, employeeId, input);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "No se pudo agregar el empleado" };
+  }
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
 
 export async function updateEmployeeRoleAction(employeeId: string, role: EmployeeRole) {
   const { organizationId, employeeId: actorId } = await requireEmployeeSession();
-  updateEmployeeRole(organizationId, actorId, employeeId, role);
+  await updateEmployeeRole(organizationId, actorId, employeeId, role);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
 
 export async function setEmployeeActiveAction(employeeId: string, active: boolean) {
   const { organizationId, employeeId: actorId } = await requireEmployeeSession();
-  setEmployeeActive(organizationId, actorId, employeeId, active);
+  await setEmployeeActive(organizationId, actorId, employeeId, active);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
@@ -281,14 +280,14 @@ export async function setEmployeeActiveAction(employeeId: string, active: boolea
 
 export async function joinWaitlistAction(organizationId: string, courtId: string, date: string, startTime: string, contact: GuestContact) {
   const customer = await identifyGuest(organizationId, contact);
-  joinWaitlist(organizationId, customer.id, courtId, date, startTime);
+  await joinWaitlist(organizationId, customer.id, courtId, date, startTime);
   revalidateEverywhere();
 }
 
 export async function redeemRewardAction(organizationId: string, rewardId: string) {
   const session = await getCustomerSession(organizationId);
   if (!session) throw new Error("No pudimos identificarte");
-  redeemLoyaltyReward(organizationId, session.customerId, rewardId);
+  await redeemLoyaltyReward(organizationId, session.customerId, rewardId);
   revalidateEverywhere();
 }
 
@@ -301,14 +300,14 @@ export async function createPromotionAction(input: {
   sports?: Sport[];
 }) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  createPromotion(organizationId, employeeId, { ...input, active: true });
+  await createPromotion(organizationId, employeeId, { ...input, active: true });
   revalidatePath("/admin/promociones");
   revalidatePath("/admin/auditoria");
 }
 
 export async function setPromotionActiveAction(promotionId: string, active: boolean) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  setPromotionActive(organizationId, employeeId, promotionId, active);
+  await setPromotionActive(organizationId, employeeId, promotionId, active);
   revalidatePath("/admin/promociones");
   revalidatePath("/admin/auditoria");
 }
@@ -323,7 +322,7 @@ export async function createTournamentAction(input: {
   prize: string;
 }) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  const tournament = createTournament(organizationId, employeeId, input);
+  const tournament = await createTournament(organizationId, employeeId, input);
   revalidatePath("/admin/torneos");
   revalidateEverywhere();
   return tournament.id;
@@ -340,7 +339,7 @@ export async function registerTeamAction(input: {
   contact?: GuestContact;
 }) {
   const customer = input.contact ? await identifyGuest(input.organizationId, input.contact) : undefined;
-  registerTeam(input.organizationId, {
+  await registerTeam(input.organizationId, {
     tournamentId: input.tournamentId,
     name: input.name,
     playerNames: input.playerNames,
@@ -353,7 +352,7 @@ export async function registerTeamAction(input: {
 
 export async function generateBracketAction(tournamentId: string) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  generateBracket(organizationId, employeeId, tournamentId);
+  await generateBracket(organizationId, employeeId, tournamentId);
   revalidatePath(`/admin/torneos/${tournamentId}`);
   revalidatePath("/admin/torneos");
   revalidateEverywhere();
@@ -361,7 +360,7 @@ export async function generateBracketAction(tournamentId: string) {
 
 export async function recordMatchResultAction(matchId: string, winnerTeamId: string, scoreLabel: string, tournamentId: string) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  recordMatchResult(organizationId, employeeId, matchId, winnerTeamId, scoreLabel || undefined);
+  await recordMatchResult(organizationId, employeeId, matchId, winnerTeamId, scoreLabel || undefined);
   revalidatePath(`/admin/torneos/${tournamentId}`);
   revalidatePath("/admin/ranking");
   revalidatePath("/admin/auditoria");
@@ -374,25 +373,25 @@ export async function recordMatchResultAction(matchId: string, winnerTeamId: str
 
 export async function changePlanAction(planId: PlanId) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  changePlan(organizationId, employeeId, planId);
+  await changePlan(organizationId, employeeId, planId);
   revalidateEverywhere();
 }
 
 export async function activateSubscriptionAction(billingEmail: string) {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  activateSubscription(organizationId, employeeId, billingEmail);
+  await activateSubscription(organizationId, employeeId, billingEmail);
   revalidateEverywhere();
 }
 
 export async function cancelSubscriptionAction() {
   const { organizationId, employeeId } = await requireEmployeeSession();
-  cancelSubscription(organizationId, employeeId);
+  await cancelSubscription(organizationId, employeeId);
   revalidateEverywhere();
 }
 
 export async function simulateTrialExpiredAction() {
   const { organizationId } = await requireEmployeeSession();
-  simulateTrialExpired(organizationId);
+  await simulateTrialExpired(organizationId);
   revalidateEverywhere();
 }
 
@@ -402,14 +401,14 @@ export async function simulateTrialExpiredAction() {
 
 export async function superadminChangePlanAction(organizationId: string, planId: PlanId) {
   await requireSuperadminSession();
-  adminChangePlan(organizationId, planId);
+  await adminChangePlan(organizationId, planId);
   revalidatePath("/superadmin/organizaciones");
   revalidatePath(`/superadmin/organizaciones/${organizationId}`);
 }
 
 export async function superadminSetStatusAction(organizationId: string, status: SubscriptionStatus) {
   await requireSuperadminSession();
-  adminSetSubscriptionStatus(organizationId, status);
+  await adminSetSubscriptionStatus(organizationId, status);
   revalidatePath("/superadmin/organizaciones");
   revalidatePath(`/superadmin/organizaciones/${organizationId}`);
 }

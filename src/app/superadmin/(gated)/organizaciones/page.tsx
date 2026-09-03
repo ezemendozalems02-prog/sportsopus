@@ -5,8 +5,8 @@ import { formatDateLong } from "@/lib/time";
 
 const PLAN_LABELS: Record<string, string> = { starter: "Starter", pro: "Pro", business: "Business" };
 
-export default function OrganizacionesPage() {
-  const rows = listOrgSummaries();
+export default async function OrganizacionesPage() {
+  const rows = await listOrgSummaries();
 
   return (
     <div>

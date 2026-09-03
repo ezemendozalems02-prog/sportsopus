@@ -11,13 +11,13 @@ export default async function ConfirmadoPage({
   params: Promise<{ orgSlug: string; bookingId: string }>;
 }) {
   const { orgSlug, bookingId } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
-  const booking = getBooking(org.id, bookingId);
+  const booking = await getBooking(org.id, bookingId);
   if (!booking) notFound();
 
-  const court = getCourt(org.id, booking.courtId);
+  const court = await getCourt(org.id, booking.courtId);
 
   return (
     <div className="flex flex-col items-center text-center">

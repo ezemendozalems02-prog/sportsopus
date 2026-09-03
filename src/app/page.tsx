@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { getOrganizationBySlug } from "@/lib/db";
 
-export default function Home() {
-  const demoOrg = getOrganizationBySlug("sport-club-palermo");
+export default async function Home() {
+  const demoOrg = await getOrganizationBySlug("sport-club-palermo");
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-black">

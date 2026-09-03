@@ -21,15 +21,15 @@ export function AddEmployeeForm() {
     if (!name || !email || password.length < 6) return;
     setError(null);
     startTransition(async () => {
-      try {
-        await addEmployeeAction({ name, email, role, password });
-        setName("");
-        setEmail("");
-        setPassword("");
-        router.refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "No se pudo agregar el empleado");
+      const result = await addEmployeeAction({ name, email, role, password });
+      if (result?.error) {
+        setError(result.error);
+        return;
       }
+      setName("");
+      setEmail("");
+      setPassword("");
+      router.refresh();
     });
   }
 

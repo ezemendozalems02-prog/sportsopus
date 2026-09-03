@@ -7,11 +7,11 @@ import { RedeemButton } from "./redeem-button";
 
 export default async function BeneficiosPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
   const session = await getCustomerSession(org.id);
-  const rewards = listLoyaltyRewards();
+  const rewards = await listLoyaltyRewards(org.id);
 
   if (!session) {
     return (
@@ -32,9 +32,9 @@ export default async function BeneficiosPage({ params }: { params: Promise<{ org
     );
   }
 
-  const customer = getCustomer(org.id, session.customerId);
+  const customer = await getCustomer(org.id, session.customerId);
   if (!customer) notFound();
-  const redemptions = listLoyaltyRedemptions(org.id, customer.id);
+  const redemptions = await listLoyaltyRedemptions(org.id, customer.id);
 
   return (
     <div>

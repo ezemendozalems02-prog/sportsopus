@@ -13,9 +13,9 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function SuperadminDashboardPage() {
-  const stats = getPlatformStats();
-  const recentOrgs = listOrgSummaries().slice(0, 5);
+export default async function SuperadminDashboardPage() {
+  const stats = await getPlatformStats();
+  const recentOrgs = (await listOrgSummaries()).slice(0, 5);
 
   return (
     <div>

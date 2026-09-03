@@ -8,7 +8,7 @@ import { AddExpenseForm } from "./add-expense-form";
 export default async function GastosPage() {
   const { organizationId } = await requireEmployeeSession();
   const currentMonth = todayISO().slice(0, 7);
-  const expenses = listExpensesForMonth(organizationId, currentMonth);
+  const expenses = await listExpensesForMonth(organizationId, currentMonth);
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   const byCategory = expenses.reduce<Record<string, number>>((acc, e) => {

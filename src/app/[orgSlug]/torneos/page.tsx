@@ -13,10 +13,15 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default async function TorneosPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
-  const tournaments = listTournaments(org.id);
+  const tournaments = await listTournaments(org.id);
+  const teamsByTournament = new Map(
+    await Promise.all(
+      tournaments.map(async (t) => [t.id, await listTeamsForTournament(t.id)] as const)
+    )
+  );
 
   return (
     <div>
@@ -24,7 +29,7 @@ export default async function TorneosPage({ params }: { params: Promise<{ orgSlu
 
       <div className="mt-6 flex flex-col gap-3">
         {tournaments.map((tournament) => {
-          const teams = listTeamsForTournament(tournament.id);
+          const teams = teamsByTournament.get(tournament.id) ?? [];
           return (
             <Link key={tournament.id} href={`/${orgSlug}/torneos/${tournament.id}`}>
               <Card className="transition hover:border-emerald-400">

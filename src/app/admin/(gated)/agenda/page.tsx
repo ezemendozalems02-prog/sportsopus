@@ -14,7 +14,15 @@ export default async function AgendaPage({
   const { organizationId } = await requireEmployeeSession();
   const { date: dateParam } = await searchParams;
   const date = dateParam ?? todayISO();
-  const bookings = listBookingsForDate(organizationId, date).sort((a, b) => (a.startTime > b.startTime ? 1 : -1));
+  const bookingsForDate = await listBookingsForDate(organizationId, date);
+  const bookings = bookingsForDate.sort((a, b) => (a.startTime > b.startTime ? 1 : -1));
+  const bookingsWithDetails = await Promise.all(
+    bookings.map(async (booking) => ({
+      booking,
+      court: await getCourt(organizationId, booking.courtId),
+      customer: await getCustomer(organizationId, booking.customerId),
+    }))
+  );
 
   return (
     <div>
@@ -46,9 +54,7 @@ export default async function AgendaPage({
       </div>
 
       <div className="mt-6 flex flex-col gap-3">
-        {bookings.map((booking) => {
-          const court = getCourt(organizationId, booking.courtId);
-          const customer = getCustomer(organizationId, booking.customerId);
+        {bookingsWithDetails.map(({ booking, court, customer }) => {
           return (
             <Card key={booking.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">

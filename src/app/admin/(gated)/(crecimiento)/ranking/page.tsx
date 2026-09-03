@@ -6,7 +6,7 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default async function RankingPage() {
   const { organizationId } = await requireEmployeeSession();
-  const ranking = computeRanking(organizationId);
+  const ranking = await computeRanking(organizationId);
 
   return (
     <div>

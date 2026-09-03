@@ -4,6 +4,6 @@ import { PlanUpsell } from "@/components/paywall";
 
 export default async function CrecimientoLayout({ children }: { children: React.ReactNode }) {
   const { organizationId } = await requireEmployeeSession();
-  if (!hasFeatureAccess(organizationId, "crecimiento")) return <PlanUpsell group="crecimiento" />;
+  if (!(await hasFeatureAccess(organizationId, "crecimiento"))) return <PlanUpsell group="crecimiento" />;
   return <>{children}</>;
 }

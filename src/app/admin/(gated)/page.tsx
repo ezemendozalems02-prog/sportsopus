@@ -13,24 +13,27 @@ import {
   listTournaments,
 } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
+import type { Booking } from "@/lib/types";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { formatDateLong, todayISO } from "@/lib/time";
 import { Card, OccupancyBar, StatTile, StatusBadge } from "@/components/ui";
 import { RevenueTrendChart } from "@/components/charts";
 
-function paymentsTotal(bookings: ReturnType<typeof listBookingsForDate>) {
+function paymentsTotal(bookings: Booking[]) {
   return bookings.reduce((sum, b) => sum + b.payments.reduce((s, p) => s + p.amount, 0), 0);
 }
 
 export default async function AdminDashboardPage() {
   const { organizationId } = await requireEmployeeSession();
   const today = todayISO();
-  const courts = listCourts(organizationId).filter((c) => c.active);
-  const todayBookings = listBookingsForDate(organizationId, today);
-  const todaySales = listSales(organizationId).filter((s) => s.createdAt.startsWith(today));
-  const lowStock = listLowStockProducts(organizationId);
-  const cashSession = getOpenCashSession(organizationId);
-  const trend = computeDailyRevenue(organizationId, 14);
+  const allCourts = await listCourts(organizationId);
+  const courts = allCourts.filter((c) => c.active);
+  const todayBookings = await listBookingsForDate(organizationId, today);
+  const allTodaySales = await listSales(organizationId);
+  const todaySales = allTodaySales.filter((s) => s.createdAt.startsWith(today));
+  const lowStock = await listLowStockProducts(organizationId);
+  const cashSession = await getOpenCashSession(organizationId);
+  const trend = await computeDailyRevenue(organizationId, 14);
 
   // Revenue actually collected today = payments recorded on today's bookings
   // (a "pendiente_pago" booking has none yet, "sena_pagada" only the deposit)
@@ -44,11 +47,13 @@ export default async function AdminDashboardPage() {
   ).length;
   const pendingCount = todayBookings.filter((b) => b.status === "pendiente_pago").length;
 
-  const courtOccupancy = courts.map((court) => {
-    const slots = getSlotsForCourt(organizationId, court.id, today);
-    const occupied = slots.filter((s) => !s.available).length;
-    return { court, pct: slots.length ? occupied / slots.length : 0 };
-  });
+  const courtOccupancy = await Promise.all(
+    courts.map(async (court) => {
+      const slots = await getSlotsForCourt(organizationId, court.id, today);
+      const occupied = slots.filter((s) => !s.available).length;
+      return { court, pct: slots.length ? occupied / slots.length : 0 };
+    })
+  );
 
   const overallOccupancy =
     courtOccupancy.reduce((sum, c) => sum + c.pct, 0) / (courtOccupancy.length || 1);
@@ -60,7 +65,23 @@ export default async function AdminDashboardPage() {
     }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  const activeTournaments = listTournaments(organizationId).filter((t) => t.status !== "finalizado");
+  const allTournaments = await listTournaments(organizationId);
+  const activeTournaments = allTournaments.filter((t) => t.status !== "finalizado");
+  const activeTournamentsWithTeams = await Promise.all(
+    activeTournaments.map(async (t) => ({
+      tournament: t,
+      teamsCount: (await listTeamsForTournament(t.id)).length,
+    }))
+  );
+
+  const todayBookingsSorted = [...todayBookings].sort((a, b) => (a.startTime > b.startTime ? 1 : -1)).slice(0, 8);
+  const todayAgenda = await Promise.all(
+    todayBookingsSorted.map(async (booking) => ({
+      booking,
+      court: courts.find((c) => c.id === booking.courtId),
+      customer: await getCustomer(organizationId, booking.customerId),
+    }))
+  );
 
   return (
     <div>
@@ -106,22 +127,17 @@ export default async function AdminDashboardPage() {
             </Link>
           </div>
           <div className="mt-4 flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-            {todayBookings
-              .sort((a, b) => (a.startTime > b.startTime ? 1 : -1))
-              .slice(0, 8)
-              .map((booking) => {
-                const court = courts.find((c) => c.id === booking.courtId);
-                const customer = getCustomer(organizationId, booking.customerId);
-                return (
-                  <div key={booking.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                    <span className="w-12 shrink-0 font-medium text-zinc-700 dark:text-zinc-300">{booking.startTime}</span>
-                    <span className="flex-1 truncate text-zinc-600 dark:text-zinc-400">
-                      {court?.name} · {customer?.name}
-                    </span>
-                    <StatusBadge status={booking.status} />
-                  </div>
-                );
-              })}
+            {todayAgenda.map(({ booking, court, customer }) => {
+              return (
+                <div key={booking.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <span className="w-12 shrink-0 font-medium text-zinc-700 dark:text-zinc-300">{booking.startTime}</span>
+                  <span className="flex-1 truncate text-zinc-600 dark:text-zinc-400">
+                    {court?.name} · {customer?.name}
+                  </span>
+                  <StatusBadge status={booking.status} />
+                </div>
+              );
+            })}
             {todayBookings.length === 0 && (
               <p className="py-4 text-sm text-zinc-400">Sin reservas para hoy todavía.</p>
             )}
@@ -159,8 +175,7 @@ export default async function AdminDashboardPage() {
             </Link>
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            {activeTournaments.map((t) => {
-              const teams = listTeamsForTournament(t.id);
+            {activeTournamentsWithTeams.map(({ tournament: t, teamsCount }) => {
               return (
                 <Link
                   key={t.id}
@@ -169,7 +184,7 @@ export default async function AdminDashboardPage() {
                 >
                   <span>{t.name}</span>
                   <span>
-                    {teams.length}/{t.maxTeams} inscriptos
+                    {teamsCount}/{t.maxTeams} inscriptos
                   </span>
                 </Link>
               );

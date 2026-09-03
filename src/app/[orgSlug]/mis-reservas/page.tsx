@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  getCourt,
+  listCourts,
   getOrganizationBySlug,
   listBookingsForCustomer,
   listWaitlistForCustomer,
@@ -20,7 +20,7 @@ const WAITLIST_STATUS_LABELS: Record<string, string> = {
 
 export default async function MisReservasPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
   const session = await getCustomerSession(org.id);
@@ -43,8 +43,11 @@ export default async function MisReservasPage({ params }: { params: Promise<{ or
     );
   }
 
-  const bookings = listBookingsForCustomer(org.id, session.customerId);
-  const waitlist = listWaitlistForCustomer(org.id, session.customerId).filter((w) => w.status !== "reservado");
+  const bookings = await listBookingsForCustomer(org.id, session.customerId);
+  const waitlistAll = await listWaitlistForCustomer(org.id, session.customerId);
+  const waitlist = waitlistAll.filter((w) => w.status !== "reservado");
+  const courts = await listCourts(org.id);
+  const courtById = new Map(courts.map((c) => [c.id, c]));
 
   return (
     <div>
@@ -54,7 +57,7 @@ export default async function MisReservasPage({ params }: { params: Promise<{ or
       {waitlist.length > 0 && (
         <div className="mt-4 flex flex-col gap-2">
           {waitlist.map((entry) => {
-            const court = getCourt(org.id, entry.courtId);
+            const court = courtById.get(entry.courtId);
             return (
               <div
                 key={entry.id}
@@ -76,7 +79,7 @@ export default async function MisReservasPage({ params }: { params: Promise<{ or
 
       <div className="mt-6 flex flex-col gap-3">
         {bookings.map((booking) => {
-          const court = getCourt(org.id, booking.courtId);
+          const court = courtById.get(booking.courtId);
           return (
             <Card key={booking.id}>
               <div className="flex items-start justify-between gap-3">

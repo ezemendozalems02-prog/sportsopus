@@ -11,7 +11,7 @@ export default async function OrgClientLayout({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const org = getOrganizationBySlug(orgSlug);
+  const org = await getOrganizationBySlug(orgSlug);
   if (!org) notFound();
 
   const session = await getCustomerSession(org.id);
