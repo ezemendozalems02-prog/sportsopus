@@ -33,6 +33,7 @@ import {
   simulateTrialExpired,
   updateBookingStatus,
   updateEmployeeRole,
+  updatePaymentSettings,
   verifyPlatformAdminCredentials,
 } from "./db";
 import {
@@ -125,9 +126,10 @@ export async function superadminLogoutAction() {
 // Reservas (cliente público, identificado como invitado por email)
 // ---------------------------------------------------------------------------
 
-// Books a slot and immediately marks the deposit as paid, simulating an
-// approved Mercado Pago checkout. Swap the `payDeposit` call for a real
-// Mercado Pago preference + webhook once MERCADOPAGO_ACCESS_TOKEN is set.
+// Books a slot as "pendiente_pago" — el cliente transfiere la seña al alias
+// del club y manda el comprobante por WhatsApp; un empleado la confirma
+// desde /admin/agenda (confirmDepositAction) o, si no llega en 15 minutos,
+// se libera sola (releaseExpiredPendingBookings).
 // `weeks` > 1 books the same day/time on the following weeks too ("reserva recurrente").
 export async function reserveSlotAction(input: {
   organizationId: string;
@@ -158,8 +160,17 @@ export async function reserveSlotAction(input: {
     date: input.date,
     startTime: input.startTime,
   });
-  await payDeposit(input.organizationId, booking.id, "mercado_pago");
   return { bookingId: booking.id, createdCount: 1, skippedDates: [] };
+}
+
+// El empleado confirma que llegó la transferencia de la seña (chequeando el
+// comprobante que mandaron por WhatsApp) y recién ahí el turno pasa a
+// "sena_pagada". Antes de esto, el turno se libera solo a los 15 minutos.
+export async function confirmDepositAction(bookingId: string, method: BookingPayment["method"]) {
+  const { organizationId } = await requireEmployeeSession("/admin/agenda");
+  await payDeposit(organizationId, bookingId, method);
+  revalidatePath("/admin/agenda");
+  revalidateEverywhere();
 }
 
 export async function collectBalanceAction(bookingId: string, method: BookingPayment["method"]) {
@@ -177,6 +188,12 @@ export async function setBookingStatusAction(bookingId: string, status: BookingS
   revalidatePath("/admin/agenda");
   revalidatePath("/admin");
   revalidatePath("/admin/auditoria");
+}
+
+export async function updatePaymentSettingsAction(input: { paymentAlias: string; whatsappNumber: string }) {
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/canchas");
+  await updatePaymentSettings(organizationId, employeeId, input);
+  revalidatePath("/admin/canchas");
 }
 
 // ---------------------------------------------------------------------------

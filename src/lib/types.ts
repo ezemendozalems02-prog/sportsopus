@@ -21,6 +21,8 @@ export interface Organization {
   trialEndsAt?: string; // ISO datetime — solo relevante si subscriptionStatus === "trialing"
   currentPeriodEnd?: string; // ISO datetime — próximo cobro, si subscriptionStatus === "active"
   mercadopagoSubscriptionId?: string;
+  paymentAlias?: string; // alias/CBU para que el cliente transfiera la seña
+  whatsappNumber?: string; // wa.me del club, para mandar el comprobante
 }
 
 export interface PriceRule {

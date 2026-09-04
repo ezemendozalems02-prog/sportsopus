@@ -32,6 +32,8 @@ export function mapOrganization(r: Row): Organization {
     trialEndsAt: r.trial_ends_at ?? undefined,
     currentPeriodEnd: r.current_period_end ?? undefined,
     mercadopagoSubscriptionId: r.mercadopago_subscription_id ?? undefined,
+    paymentAlias: r.payment_alias ?? undefined,
+    whatsappNumber: r.whatsapp_number ?? undefined,
   };
 }
 

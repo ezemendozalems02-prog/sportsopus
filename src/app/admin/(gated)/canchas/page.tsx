@@ -1,13 +1,15 @@
-import { getSlotsForCourt, listCourts } from "@/lib/db";
+import { getOrganizationById, getSlotsForCourt, listCourts } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, SPORT_LABELS } from "@/lib/format";
 import { todayISO } from "@/lib/time";
 import { Card } from "@/components/ui";
 import { NewCourtForm } from "./new-court-form";
+import { PaymentSettingsForm } from "./payment-settings-form";
 
 export default async function CanchasPage() {
   const { organizationId } = await requireEmployeeSession("/admin/canchas");
   const today = todayISO();
+  const organization = await getOrganizationById(organizationId);
   const courts = await listCourts(organizationId);
   const courtsWithOccupancy = await Promise.all(
     courts.map(async (court) => {
@@ -25,6 +27,13 @@ export default async function CanchasPage() {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Canchas</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{courts.length} canchas configuradas</p>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <PaymentSettingsForm
+          paymentAlias={organization?.paymentAlias ?? ""}
+          whatsappNumber={organization?.whatsappNumber ?? ""}
+        />
       </div>
 
       <div className="mt-6">

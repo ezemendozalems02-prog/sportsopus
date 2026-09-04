@@ -130,7 +130,7 @@ export function PayButton({
         disabled={loading || !canSubmit}
         className="mt-3 w-full rounded-xl bg-emerald-600 py-3 font-medium text-white transition hover:bg-emerald-700 disabled:opacity-60"
       >
-        {loading ? "Procesando pago..." : "Pagar seña con Mercado Pago"}
+        {loading ? "Reservando..." : "Reservar y transferir la seña"}
       </button>
     </div>
   );

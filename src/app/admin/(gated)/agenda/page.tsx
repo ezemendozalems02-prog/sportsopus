@@ -75,7 +75,12 @@ export default async function AgendaPage({
                 <StatusBadge status={booking.status} />
               </div>
               <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <BookingActions bookingId={booking.id} status={booking.status} balanceAmount={booking.balanceAmount} />
+                <BookingActions
+                  bookingId={booking.id}
+                  status={booking.status}
+                  balanceAmount={booking.balanceAmount}
+                  depositAmount={booking.depositAmount}
+                />
               </div>
             </Card>
           );

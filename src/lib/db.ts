@@ -299,6 +299,22 @@ export async function getOrganizationBySlug(slug: string): Promise<Organization 
   return data ? mapOrganization(data) : undefined;
 }
 
+export async function updatePaymentSettings(
+  organizationId: string,
+  employeeId: string,
+  input: { paymentAlias: string; whatsappNumber: string }
+): Promise<Organization> {
+  const { data, error } = await db()
+    .from("organizations")
+    .update({ payment_alias: input.paymentAlias.trim() || null, whatsapp_number: input.whatsappNumber.trim() || null })
+    .eq("id", organizationId)
+    .select()
+    .single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Datos de cobro por transferencia actualizados", input.paymentAlias || "—");
+  return mapOrganization(data);
+}
+
 export async function createCourt(organizationId: string, input: {
   name: string;
   sport: Sport;
@@ -573,6 +589,7 @@ export async function listBookings(organizationId: string): Promise<Booking[]> {
 }
 
 export async function listBookingsForDate(organizationId: string, dateISO: string): Promise<Booking[]> {
+  await releaseExpiredPendingBookings(organizationId);
   const { data, error } = await db().from("bookings").select(BOOKING_SELECT).eq("organization_id", organizationId).eq("date", dateISO);
   if (error) throw error;
   return (data ?? []).map(mapBooking);
@@ -593,11 +610,30 @@ export async function listBookingsForCustomer(organizationId: string, customerId
 }
 
 export async function getBooking(organizationId: string, bookingId: string): Promise<Booking | undefined> {
+  await releaseExpiredPendingBookings(organizationId);
   const { data } = await db().from("bookings").select(BOOKING_SELECT).eq("id", bookingId).eq("organization_id", organizationId).maybeSingle();
   return data ? mapBooking(data) : undefined;
 }
 
+const PENDING_PAYMENT_MINUTES = 15;
+
+// La reserva pública ya no se auto-aprueba: queda "pendiente_pago" hasta que
+// un empleado confirme la transferencia (ver confirmDepositAction). Si nadie
+// la confirma dentro de este plazo, se libera el turno solo — se revisa acá
+// en vez de con un cron aparte, así que corre en cualquier lectura que
+// importe si el turno sigue ocupado o no.
+export async function releaseExpiredPendingBookings(organizationId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - PENDING_PAYMENT_MINUTES * 60 * 1000).toISOString();
+  await db()
+    .from("bookings")
+    .update({ status: "cancelada" })
+    .eq("organization_id", organizationId)
+    .eq("status", "pendiente_pago")
+    .lt("created_at", cutoff);
+}
+
 export async function getSlotsForCourt(organizationId: string, courtId: string, dateISO: string) {
+  await releaseExpiredPendingBookings(organizationId);
   const court = await getCourt(organizationId, courtId);
   if (!court) return [];
 
@@ -625,6 +661,7 @@ function listSlotStarts(court: Court, dateISO: string): string[] {
 }
 
 export async function isSlotAvailable(organizationId: string, courtId: string, date: string, startTime: string): Promise<boolean> {
+  await releaseExpiredPendingBookings(organizationId);
   const { data, error } = await db()
     .from("bookings")
     .select("status")
@@ -826,7 +863,6 @@ export async function createRecurringBooking(organizationId: string, input: {
       startTime: input.startTime,
       recurringGroupId: groupId,
     });
-    await payDeposit(organizationId, booking.id, "mercado_pago");
     created.push(booking);
   }
 

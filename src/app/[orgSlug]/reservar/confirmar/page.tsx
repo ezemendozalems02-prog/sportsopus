@@ -73,7 +73,7 @@ export default async function ConfirmarPage({
       </Card>
 
       <p className="mt-4 text-xs text-zinc-400">
-        Pago simulado: no hay credenciales de Mercado Pago configuradas todavía, así que el botón aprueba la seña automáticamente.
+        Al reservar te vamos a mostrar el alias para transferir la seña — el turno queda reservado por 15 minutos mientras se confirma el pago.
       </p>
 
       <PayButton

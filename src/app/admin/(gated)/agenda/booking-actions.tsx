@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { collectBalanceAction, setBookingStatusAction } from "@/lib/actions";
+import { collectBalanceAction, confirmDepositAction, setBookingStatusAction } from "@/lib/actions";
 import type { BookingStatus, PaymentMethod } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 
@@ -21,20 +21,46 @@ export function BookingActions({
   bookingId,
   status,
   balanceAmount,
+  depositAmount,
 }: {
   bookingId: string;
   status: BookingStatus;
   balanceAmount: number;
+  depositAmount: number;
 }) {
   const [pending, startTransition] = useTransition();
-  const [method, setMethod] = useState<PaymentMethod>("efectivo");
+  const [method, setMethod] = useState<PaymentMethod>("transferencia");
 
+  const canConfirmDeposit = status === "pendiente_pago";
   const canCollectBalance = status === "sena_pagada" && balanceAmount > 0;
   const nextStep = NEXT_STATUS[status];
   const canCancel = status === "pendiente_pago" || status === "sena_pagada" || status === "confirmada";
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {canConfirmDeposit && (
+        <>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+            className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            {METHODS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={pending}
+            onClick={() => startTransition(() => confirmDepositAction(bookingId, method))}
+            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            Confirmar seña {formatCurrency(depositAmount)}
+          </button>
+        </>
+      )}
+
       {canCollectBalance && (
         <>
           <select
