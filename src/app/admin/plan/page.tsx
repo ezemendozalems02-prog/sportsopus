@@ -1,4 +1,4 @@
-import { computeAccessState, getOrganizationById, getPlan, listBillingInvoices, listPlans, priceInArs } from "@/lib/db";
+import { computeAccessState, getOrganizationById, getPlan, linkMercadoPagoReturn, listBillingInvoices, listPlans, priceInArs } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency, formatUsd, SUBSCRIPTION_STATUS_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
@@ -14,8 +14,15 @@ const STATUS_COLORS: Record<string, string> = {
   red: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
 };
 
-export default async function PlanPage() {
+export default async function PlanPage({ searchParams }: { searchParams: Promise<{ preapproval_id?: string }> }) {
   const { organizationId } = await requireEmployeeSession("/admin/plan");
+  const { preapproval_id } = await searchParams;
+  if (preapproval_id) {
+    // Vuelta del checkout de suscripción de Mercado Pago — se ignora
+    // cualquier error acá (ej. el id ya no existe) para no romper la
+    // página; el estado real se puede volver a sincronizar con el webhook.
+    await linkMercadoPagoReturn(organizationId, preapproval_id).catch(() => {});
+  }
   const org = await getOrganizationById(organizationId);
   if (!org) return null;
   const plans = listPlans();
@@ -76,7 +83,9 @@ export default async function PlanPage() {
               {formatUsd(plan.priceUSD)}
               <span className="text-sm font-normal text-zinc-400">/mes</span>
             </p>
-            <p className="mt-1 text-xs text-zinc-400">{plan.tagline}</p>
+            <p className="mt-1 text-xs text-zinc-400">
+              {plan.tagline} · ≈ {formatCurrency(priceInArs(plan.priceUSD))}/mes
+            </p>
             <ul className="mt-4 flex flex-col gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
               {plan.highlights.map((h) => (
                 <li key={h} className="flex gap-2">
@@ -85,7 +94,15 @@ export default async function PlanPage() {
                 </li>
               ))}
             </ul>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-col gap-2">
+              {plan.mpCheckoutUrl && (
+                <a
+                  href={plan.mpCheckoutUrl}
+                  className="rounded-lg bg-[#009ee3] px-3 py-2 text-center text-sm font-medium text-white hover:opacity-90"
+                >
+                  Suscribirme con Mercado Pago
+                </a>
+              )}
               <ChangePlanButton planId={plan.id} current={plan.id === org.plan} />
             </div>
           </Card>

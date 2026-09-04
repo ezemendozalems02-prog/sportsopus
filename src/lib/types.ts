@@ -346,6 +346,8 @@ export interface Plan {
   tagline: string;
   featureGroups: PlanFeatureGroup[]; // qué secciones del panel desbloquea
   highlights: string[]; // bullets para la página de precios
+  mpPreapprovalPlanId?: string; // id del "preapproval_plan" de Mercado Pago
+  mpCheckoutUrl?: string; // link de checkout de suscripción de ese plan
 }
 
 export type InvoiceStatus = "pagada" | "pendiente" | "fallida";

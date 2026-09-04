@@ -22,7 +22,7 @@ export function ChangePlanButton({ planId, current }: { planId: PlanId; current:
           : "bg-emerald-600 text-white hover:bg-emerald-700"
       }`}
     >
-      {current ? "Plan actual" : pending ? "Cambiando..." : "Elegir este plan"}
+      {current ? "Plan actual" : pending ? "Cambiando..." : "Cambiar sin Mercado Pago"}
     </button>
   );
 }

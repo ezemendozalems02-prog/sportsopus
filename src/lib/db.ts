@@ -13,6 +13,7 @@ import { BLOCKING_STATUSES, generateSlots } from "./availability";
 import { applyPromotion, computeDeposit, findApplicablePromotion, resolveSlotPrice } from "./pricing";
 import { addDaysISO, dayOfWeek, minutesToTime, timeToMinutes, todayISO } from "./time";
 import { supabaseAdmin } from "./supabase/admin";
+import { fetchPreapproval } from "./mercadopago";
 import {
   mapAuditLog, mapBillingInvoice, mapBooking, mapCashMovement, mapCashSession,
   mapCourt, mapCustomer, mapEmployee, mapExpense, mapLoyaltyRedemption,
@@ -50,26 +51,40 @@ function formatArs(amount: number) {
 // Planes (catálogo en código, no en tabla — ver 0004_saas.sql)
 // ---------------------------------------------------------------------------
 
-const USD_TO_ARS = 1000;
+// Dólar blue de referencia al conectar Mercado Pago (2026-09-04) — fijo por
+// ahora, ver nota en changePlanAction/PLANS sobre actualizarlo a futuro.
+const USD_TO_ARS = 1540;
 
+// mpPreapprovalPlanId/mpCheckoutUrl: planes de suscripción reales creados en
+// Mercado Pago (app "SportControl", id 3613866164034514) el 2026-09-04, con
+// credenciales de TEST — cobran el monto en ARS de auto_recurring de cada uno
+// (ver USD_TO_ARS arriba). Para pasar a producción hace falta activar las
+// credenciales de producción de la app en el panel de Mercado Pago y volver
+// a crear estos mismos planes con esas credenciales.
 const PLANS: Plan[] = [
   {
     id: "starter", name: "Starter", priceUSD: 27,
     tagline: "Para arrancar a ordenar las reservas",
     featureGroups: [],
     highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Facturación semanal de canchas"],
+    mpPreapprovalPlanId: "4b19abaa7562444eb83ed2b6713e92e9",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=4b19abaa7562444eb83ed2b6713e92e9",
   },
   {
     id: "pro", name: "Pro", priceUSD: 57,
     tagline: "Para manejar todo el día a día del complejo",
     featureGroups: ["operacion"],
     highlights: ["Todo lo de Starter", "Caja y punto de venta", "Inventario y gastos", "Empleados y auditoría"],
+    mpPreapprovalPlanId: "9f0837d83b4143039713798cd9163d70",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=9f0837d83b4143039713798cd9163d70",
   },
   {
     id: "business", name: "Business", priceUSD: 97,
     tagline: "Para crecer con torneos, fidelización y datos",
     featureGroups: ["operacion", "crecimiento", "inteligencia"],
     highlights: ["Todo lo de Pro", "Torneos, ranking y fidelización", "Promociones y lista de espera", "Analítica, alertas y reportes"],
+    mpPreapprovalPlanId: "e8cc5778b47d4158b37b18357f2c6d8a",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=e8cc5778b47d4158b37b18357f2c6d8a",
   },
 ];
 
@@ -79,6 +94,10 @@ export function listPlans(): Plan[] {
 
 export function getPlan(planId: PlanId): Plan | undefined {
   return PLANS.find((p) => p.id === planId);
+}
+
+export function getPlanByMpPreapprovalPlanId(mpPreapprovalPlanId: string): Plan | undefined {
+  return PLANS.find((p) => p.mpPreapprovalPlanId === mpPreapprovalPlanId);
 }
 
 export function priceInArs(priceUSD: number): number {
@@ -1548,6 +1567,66 @@ export async function activateSubscription(organizationId: string, employeeId: s
 
   await logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
   return mapOrganization(data);
+}
+
+export async function getOrganizationByMpPreapproval(preapprovalId: string): Promise<Organization | undefined> {
+  const { data } = await db().from("organizations").select("*").eq("mercadopago_subscription_id", preapprovalId).maybeSingle();
+  return data ? mapOrganization(data) : undefined;
+}
+
+const MP_STATUS_TO_SUBSCRIPTION: Record<string, SubscriptionStatus | undefined> = {
+  authorized: "active",
+  paused: "past_due",
+  cancelled: "canceled",
+};
+
+// Se llama tanto cuando el dueño vuelve del checkout de Mercado Pago como
+// desde el webhook en cada evento posterior de esa misma suscripción — en
+// los dos casos el estado real siempre se pide de nuevo a la API de MP
+// (mercadopago.ts), nunca se confía en lo que viene del query param o del
+// body del webhook.
+export async function syncMercadoPagoSubscription(
+  organizationId: string,
+  preapprovalId: string,
+  planId: PlanId | undefined,
+  mpStatus: string,
+  billingEmail?: string
+): Promise<Organization> {
+  const status = MP_STATUS_TO_SUBSCRIPTION[mpStatus];
+  const update: Record<string, unknown> = { mercadopago_subscription_id: preapprovalId };
+  if (planId) update.plan = planId;
+  if (billingEmail) update.billing_email = billingEmail;
+  if (status) {
+    update.subscription_status = status;
+    if (status === "active") {
+      update.trial_ends_at = null;
+      update.current_period_end = addDaysISO(todayISO(), 30);
+    }
+  }
+
+  const { data, error } = await db().from("organizations").update(update).eq("id", organizationId).select().single();
+  must(data, error);
+
+  if (status === "active" && planId) {
+    const plan = getPlan(planId);
+    if (plan) {
+      await db().from("billing_invoices").insert({
+        organization_id: organizationId, plan: plan.id, amount_usd: plan.priceUSD, status: "pagada",
+        period_start: todayISO(), period_end: addDaysISO(todayISO(), 30),
+      });
+    }
+  }
+
+  return mapOrganization(data);
+}
+
+// El dueño vuelve del checkout de Mercado Pago a /admin/plan?preapproval_id=…
+// — acá se resuelve a qué plan corresponde ese preapproval_plan_id y se deja
+// la suscripción vinculada a esta organización con el estado real de MP.
+export async function linkMercadoPagoReturn(organizationId: string, preapprovalId: string): Promise<void> {
+  const preapproval = await fetchPreapproval(preapprovalId);
+  const plan = preapproval.preapproval_plan_id ? getPlanByMpPreapprovalPlanId(preapproval.preapproval_plan_id) : undefined;
+  await syncMercadoPagoSubscription(organizationId, preapproval.id, plan?.id, preapproval.status, preapproval.payer_email);
 }
 
 export async function cancelSubscription(organizationId: string, employeeId: string): Promise<Organization> {
