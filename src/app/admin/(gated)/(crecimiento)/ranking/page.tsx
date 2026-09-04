@@ -5,7 +5,7 @@ import { Card } from "@/components/ui";
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default async function RankingPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/ranking");
   const ranking = await computeRanking(organizationId);
 
   return (

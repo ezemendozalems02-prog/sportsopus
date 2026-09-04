@@ -3,7 +3,7 @@ import { requireEmployeeSession } from "@/lib/session";
 import { Card } from "@/components/ui";
 
 export default async function AuditoriaPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/auditoria");
   const entries = await listAuditLog(organizationId);
 
   return (

@@ -13,7 +13,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default async function TorneosAdminPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/torneos");
   const tournaments = await listTournaments(organizationId);
   const tournamentsWithTeams = await Promise.all(
     tournaments.map(async (tournament) => ({

@@ -4,7 +4,7 @@ import { formatCurrency } from "@/lib/format";
 import { RestockButton } from "./restock-button";
 
 export default async function InventarioPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/inventario");
   const categories = await listProductCategories(organizationId);
   const products = await listProducts(organizationId);
   const lowStock = await listLowStockProducts(organizationId);

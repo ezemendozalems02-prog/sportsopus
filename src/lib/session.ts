@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "./supabase/server";
 import { supabaseAdmin } from "./supabase/admin";
+import { HOME_BY_ROLE, roleCanAccess } from "./permissions";
+import type { EmployeeRole } from "./types";
 
 // Cookie/session layer para SportControl.
 //
@@ -37,25 +39,31 @@ export async function clearEmployeeSession() {
   await supabase.auth.signOut();
 }
 
-export async function getEmployeeSession(): Promise<{ employeeId: string; organizationId: string } | null> {
+export async function getEmployeeSession(): Promise<{ employeeId: string; organizationId: string; role: EmployeeRole } | null> {
   const supabase = await supabaseServer();
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
 
   const { data: employee } = await supabaseAdmin()
     .from("employees")
-    .select("id, organization_id")
+    .select("id, organization_id, role")
     .eq("user_id", data.user.id)
     .eq("active", true)
     .maybeSingle();
   if (!employee) return null;
 
-  return { employeeId: employee.id, organizationId: employee.organization_id };
+  return { employeeId: employee.id, organizationId: employee.organization_id, role: employee.role as EmployeeRole };
 }
 
-export async function requireEmployeeSession(): Promise<{ employeeId: string; organizationId: string }> {
+// `routeKey` identifica la página que llama (ej. "/admin/caja") para chequear
+// contra el mapa de permisos por rol en permissions.ts — si el rol no tiene
+// acceso, redirige a su propio home en vez de a esa página. Se omite en
+// layouts que envuelven páginas con distintos roles permitidos (el chequeo
+// de rol vive en cada página, no en el layout compartido).
+export async function requireEmployeeSession(routeKey?: string): Promise<{ employeeId: string; organizationId: string; role: EmployeeRole }> {
   const session = await getEmployeeSession();
   if (!session) redirect("/login");
+  if (routeKey && !roleCanAccess(session.role, routeKey)) redirect(HOME_BY_ROLE[session.role]);
   return session;
 }
 

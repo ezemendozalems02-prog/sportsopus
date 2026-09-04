@@ -25,7 +25,7 @@ export default async function ReportesPage({
 }: {
   searchParams: Promise<{ period?: string }>;
 }) {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/reportes");
   const { period } = await searchParams;
   const days = period === "30" ? 30 : 7;
   const today = todayISO();

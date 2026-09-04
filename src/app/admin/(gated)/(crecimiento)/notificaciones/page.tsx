@@ -11,7 +11,7 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 export default async function NotificacionesPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/notificaciones");
   const notifications = await listNotifications(organizationId);
   const notificationsWithCustomer = await Promise.all(
     notifications.map(async (n) => ({ n, customer: await getCustomer(organizationId, n.customerId) }))

@@ -15,7 +15,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function PlanPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/plan");
   const org = await getOrganizationById(organizationId);
   if (!org) return null;
   const plans = listPlans();

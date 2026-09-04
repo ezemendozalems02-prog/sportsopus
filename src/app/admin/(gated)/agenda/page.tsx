@@ -11,7 +11,7 @@ export default async function AgendaPage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/agenda");
   const { date: dateParam } = await searchParams;
   const date = dateParam ?? todayISO();
   const bookingsForDate = await listBookingsForDate(organizationId, date);

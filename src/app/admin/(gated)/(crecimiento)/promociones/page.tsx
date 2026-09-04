@@ -13,7 +13,7 @@ export default async function PromocionesPage({
 }: {
   searchParams: Promise<{ dow?: string; band?: string; sport?: string }>;
 }) {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/promociones");
   const promotions = await listPromotions(organizationId);
   const { dow, band, sport } = await searchParams;
   const [prefillStart, prefillEnd] = band?.split("-") ?? [];

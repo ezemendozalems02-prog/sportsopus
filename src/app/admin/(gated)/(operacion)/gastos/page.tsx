@@ -6,7 +6,7 @@ import { Card, StatTile } from "@/components/ui";
 import { AddExpenseForm } from "./add-expense-form";
 
 export default async function GastosPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/gastos");
   const currentMonth = todayISO().slice(0, 7);
   const expenses = await listExpensesForMonth(organizationId, currentMonth);
   const total = expenses.reduce((sum, e) => sum + e.amount, 0);

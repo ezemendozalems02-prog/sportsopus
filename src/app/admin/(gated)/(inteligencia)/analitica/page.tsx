@@ -17,7 +17,7 @@ import { Card, OccupancyBar, StatTile } from "@/components/ui";
 import { PaymentMethodPieChart, RevenueTrendChart } from "@/components/charts";
 
 export default async function AnaliticaPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/analitica");
   const [daily, courtRanking, hourBands, weekdays, paymentMethods, category, pnl, lowDemand, highDemand] = await Promise.all([
     computeDailyRevenue(organizationId, 14),
     computeCourtRevenueRanking(organizationId),

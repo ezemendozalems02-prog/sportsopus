@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 import { NewCourtForm } from "./new-court-form";
 
 export default async function CanchasPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/canchas");
   const today = todayISO();
   const courts = await listCourts(organizationId);
   const courtsWithOccupancy = await Promise.all(

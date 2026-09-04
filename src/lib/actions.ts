@@ -250,7 +250,7 @@ export async function addExpenseAction(input: {
 }
 
 export async function addEmployeeAction(input: { name: string; email: string; role: EmployeeRole; password: string }): Promise<{ error: string } | void> {
-  const { organizationId, employeeId } = await requireEmployeeSession();
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/empleados");
   try {
     await addEmployee(organizationId, employeeId, input);
   } catch (e) {
@@ -261,14 +261,14 @@ export async function addEmployeeAction(input: { name: string; email: string; ro
 }
 
 export async function updateEmployeeRoleAction(employeeId: string, role: EmployeeRole) {
-  const { organizationId, employeeId: actorId } = await requireEmployeeSession();
+  const { organizationId, employeeId: actorId } = await requireEmployeeSession("/admin/empleados");
   await updateEmployeeRole(organizationId, actorId, employeeId, role);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
 }
 
 export async function setEmployeeActiveAction(employeeId: string, active: boolean) {
-  const { organizationId, employeeId: actorId } = await requireEmployeeSession();
+  const { organizationId, employeeId: actorId } = await requireEmployeeSession("/admin/empleados");
   await setEmployeeActive(organizationId, actorId, employeeId, active);
   revalidatePath("/admin/empleados");
   revalidatePath("/admin/auditoria");
@@ -372,25 +372,25 @@ export async function recordMatchResultAction(matchId: string, winnerTeamId: str
 // ---------------------------------------------------------------------------
 
 export async function changePlanAction(planId: PlanId) {
-  const { organizationId, employeeId } = await requireEmployeeSession();
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/plan");
   await changePlan(organizationId, employeeId, planId);
   revalidateEverywhere();
 }
 
 export async function activateSubscriptionAction(billingEmail: string) {
-  const { organizationId, employeeId } = await requireEmployeeSession();
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/plan");
   await activateSubscription(organizationId, employeeId, billingEmail);
   revalidateEverywhere();
 }
 
 export async function cancelSubscriptionAction() {
-  const { organizationId, employeeId } = await requireEmployeeSession();
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/plan");
   await cancelSubscription(organizationId, employeeId);
   revalidateEverywhere();
 }
 
 export async function simulateTrialExpiredAction() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/plan");
   await simulateTrialExpired(organizationId);
   revalidateEverywhere();
 }

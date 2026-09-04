@@ -11,7 +11,7 @@ import { GenerateBracketButton } from "./generate-bracket-button";
 import { MatchResultForm } from "./match-result-form";
 
 export default async function AdminTorneoDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/torneos");
   const { id } = await params;
   const tournament = await getTournament(organizationId, id);
   if (!tournament) notFound();

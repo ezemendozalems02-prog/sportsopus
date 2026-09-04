@@ -30,7 +30,7 @@ function alertCard(key: string, emoji: string, text: React.ReactNode, href?: str
 }
 
 export default async function AlertasPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/alertas");
   const today = todayISO();
   const todayBookings = await listBookingsForDate(organizationId, today);
   const pending = todayBookings.filter((b) => b.status === "pendiente_pago");

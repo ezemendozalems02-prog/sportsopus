@@ -20,7 +20,7 @@ async function customerStats(organizationId: string, customerId: string) {
 }
 
 export default async function ClientesPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/clientes");
   const customers = await listCustomers(organizationId);
   const customersWithStats = await Promise.all(
     customers.map(async (customer) => {

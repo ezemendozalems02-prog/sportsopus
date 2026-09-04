@@ -6,7 +6,7 @@ import { AddEmployeeForm } from "./add-employee-form";
 import { EmployeeRowActions } from "./employee-row-actions";
 
 export default async function EmpleadosPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/empleados");
   const employees = await listEmployees(organizationId);
 
   return (

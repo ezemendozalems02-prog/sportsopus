@@ -21,7 +21,7 @@ const MOVEMENT_LABELS: Record<string, string> = {
 };
 
 export default async function CajaPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin/caja");
   const session = await getOpenCashSession(organizationId);
   const products = await listProducts(organizationId);
   const categories = await listProductCategories(organizationId);

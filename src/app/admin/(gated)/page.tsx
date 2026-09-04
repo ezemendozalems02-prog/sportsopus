@@ -25,7 +25,7 @@ function paymentsTotal(bookings: Booking[]) {
 }
 
 export default async function AdminDashboardPage() {
-  const { organizationId } = await requireEmployeeSession();
+  const { organizationId } = await requireEmployeeSession("/admin");
   const today = todayISO();
   const hasOperacion = await hasFeatureAccess(organizationId, "operacion");
   const hasCrecimiento = await hasFeatureAccess(organizationId, "crecimiento");
