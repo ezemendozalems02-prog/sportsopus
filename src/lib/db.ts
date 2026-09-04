@@ -56,35 +56,33 @@ function formatArs(amount: number) {
 const USD_TO_ARS = 1540;
 
 // mpPreapprovalPlanId/mpCheckoutUrl: planes de suscripción reales creados en
-// Mercado Pago (app "SportControl", id 3613866164034514) el 2026-09-04, con
-// credenciales de TEST — cobran el monto en ARS de auto_recurring de cada uno
-// (ver USD_TO_ARS arriba). Para pasar a producción hace falta activar las
-// credenciales de producción de la app en el panel de Mercado Pago y volver
-// a crear estos mismos planes con esas credenciales.
+// Mercado Pago (app "SportControl", id 3613866164034514) — cobran el monto
+// en ARS de auto_recurring de cada uno (ver USD_TO_ARS arriba). Recreados con
+// credenciales de PRODUCCIÓN el 2026-09-04, ya activadas.
 const PLANS: Plan[] = [
   {
     id: "starter", name: "Starter", priceUSD: 27,
     tagline: "Para arrancar a ordenar las reservas",
     featureGroups: [],
     highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Facturación semanal de canchas"],
-    mpPreapprovalPlanId: "4b19abaa7562444eb83ed2b6713e92e9",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=4b19abaa7562444eb83ed2b6713e92e9",
+    mpPreapprovalPlanId: "95ffea56607c4fcd8b5a132ea92f47d0",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=95ffea56607c4fcd8b5a132ea92f47d0",
   },
   {
     id: "pro", name: "Pro", priceUSD: 57,
     tagline: "Para manejar todo el día a día del complejo",
     featureGroups: ["operacion"],
     highlights: ["Todo lo de Starter", "Caja y punto de venta", "Inventario y gastos", "Empleados y auditoría"],
-    mpPreapprovalPlanId: "9f0837d83b4143039713798cd9163d70",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=9f0837d83b4143039713798cd9163d70",
+    mpPreapprovalPlanId: "a9450ac9d51b47ca9a77b08c355e54d0",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=a9450ac9d51b47ca9a77b08c355e54d0",
   },
   {
     id: "business", name: "Business", priceUSD: 97,
     tagline: "Para crecer con torneos, fidelización y datos",
     featureGroups: ["operacion", "crecimiento", "inteligencia"],
     highlights: ["Todo lo de Pro", "Torneos, ranking y fidelización", "Promociones y lista de espera", "Analítica, alertas y reportes"],
-    mpPreapprovalPlanId: "e8cc5778b47d4158b37b18357f2c6d8a",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=e8cc5778b47d4158b37b18357f2c6d8a",
+    mpPreapprovalPlanId: "762bd559cce046dcb2a16ad0576de626",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=762bd559cce046dcb2a16ad0576de626",
   },
 ];
 
