@@ -57,7 +57,7 @@ const PLANS: Plan[] = [
     id: "starter", name: "Starter", priceUSD: 27,
     tagline: "Para arrancar a ordenar las reservas",
     featureGroups: [],
-    highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Dashboard básico"],
+    highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Facturación semanal de canchas"],
   },
   {
     id: "pro", name: "Pro", priceUSD: 57,
