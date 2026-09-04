@@ -2,6 +2,8 @@ import { listLowStockProducts, listProductCategories, listProducts } from "@/lib
 import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
 import { RestockButton } from "./restock-button";
+import { NewProductForm } from "./new-product-form";
+import { EditProductButton } from "./edit-product-button";
 
 export default async function InventarioPage() {
   const { organizationId } = await requireEmployeeSession("/admin/inventario");
@@ -13,6 +15,10 @@ export default async function InventarioPage() {
     <div>
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Inventario</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{products.length} productos</p>
+
+      <div className="mt-4">
+        <NewProductForm categories={categories} />
+      </div>
 
       {lowStock.length > 0 && (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
@@ -40,9 +46,12 @@ export default async function InventarioPage() {
               const margin = product.price - product.cost;
               const low = product.stock <= product.minStock;
               return (
-                <tr key={product.id}>
+                <tr key={product.id} className={product.active ? undefined : "opacity-50"}>
                   <td className="rounded-l-xl bg-white px-3 py-3 dark:bg-zinc-900">
-                    <p className="font-medium text-zinc-900 dark:text-zinc-50">{product.name}</p>
+                    <p className="font-medium text-zinc-900 dark:text-zinc-50">
+                      {product.name}
+                      {!product.active && <span className="ml-2 text-xs font-normal text-zinc-400">(inactivo)</span>}
+                    </p>
                     <p className="text-xs text-zinc-400">{product.sku}</p>
                   </td>
                   <td className="bg-white px-3 py-3 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">{category?.name}</td>
@@ -66,7 +75,10 @@ export default async function InventarioPage() {
                     {formatCurrency(margin)}
                   </td>
                   <td className="rounded-r-xl bg-white px-3 py-3 dark:bg-zinc-900">
-                    <RestockButton productId={product.id} productName={product.name} />
+                    <div className="flex gap-2">
+                      <RestockButton productId={product.id} productName={product.name} />
+                      <EditProductButton product={product} categories={categories} />
+                    </div>
                   </td>
                 </tr>
               );

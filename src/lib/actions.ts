@@ -16,6 +16,8 @@ import {
   createCourt,
   createOrganization,
   createPendingBooking,
+  createProduct,
+  createProductCategory,
   createPromotion,
   createRecurringBooking,
   createSale,
@@ -34,6 +36,7 @@ import {
   updateBookingStatus,
   updateEmployeeRole,
   updatePaymentSettings,
+  updateProduct,
   verifyPlatformAdminCredentials,
 } from "./db";
 import {
@@ -232,6 +235,41 @@ export async function createSaleAction(input: {
 export async function adjustStockAction(productId: string, delta: number, reason: string) {
   const { organizationId, employeeId } = await requireEmployeeSession();
   await adjustStock(organizationId, employeeId, productId, delta, reason);
+  revalidatePath("/admin/inventario");
+  revalidatePath("/admin/auditoria");
+}
+
+export async function createProductCategoryAction(name: string) {
+  const { organizationId } = await requireEmployeeSession("/admin/inventario");
+  const category = await createProductCategory(organizationId, name);
+  revalidatePath("/admin/inventario");
+  return category;
+}
+
+export async function createProductAction(input: {
+  categoryId: string;
+  name: string;
+  cost: number;
+  price: number;
+  stock: number;
+  minStock: number;
+}) {
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/inventario");
+  await createProduct(organizationId, employeeId, input);
+  revalidatePath("/admin/inventario");
+  revalidatePath("/admin/auditoria");
+}
+
+export async function updateProductAction(productId: string, input: {
+  name: string;
+  categoryId: string;
+  cost: number;
+  price: number;
+  minStock: number;
+  active: boolean;
+}) {
+  const { organizationId, employeeId } = await requireEmployeeSession("/admin/inventario");
+  await updateProduct(organizationId, employeeId, productId, input);
   revalidatePath("/admin/inventario");
   revalidatePath("/admin/auditoria");
 }

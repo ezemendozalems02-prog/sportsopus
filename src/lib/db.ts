@@ -934,6 +934,81 @@ export async function adjustStock(organizationId: string, employeeId: string, pr
   return mapProduct(data);
 }
 
+export async function createProductCategory(organizationId: string, name: string): Promise<ProductCategory> {
+  const { data, error } = await db()
+    .from("product_categories")
+    .insert({ organization_id: organizationId, name })
+    .select()
+    .single();
+  must(data, error);
+  return mapProductCategory(data);
+}
+
+async function generateUniqueSku(organizationId: string, name: string): Promise<string> {
+  const base = slugify(name).toUpperCase().replace(/-/g, "").slice(0, 12) || "PROD";
+  const { data } = await db().from("products").select("sku").eq("organization_id", organizationId).like("sku", `${base}%`);
+  const taken = new Set((data ?? []).map((r: { sku: string }) => r.sku));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}${n}`)) n++;
+  return `${base}${n}`;
+}
+
+export async function createProduct(organizationId: string, employeeId: string, input: {
+  categoryId: string;
+  name: string;
+  cost: number;
+  price: number;
+  stock: number;
+  minStock: number;
+}): Promise<Product> {
+  const sku = await generateUniqueSku(organizationId, input.name);
+  const { data, error } = await db()
+    .from("products")
+    .insert({
+      organization_id: organizationId,
+      category_id: input.categoryId,
+      name: input.name,
+      sku,
+      cost: input.cost,
+      price: input.price,
+      stock: input.stock,
+      min_stock: input.minStock,
+    })
+    .select()
+    .single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Producto creado", input.name);
+  return mapProduct(data);
+}
+
+export async function updateProduct(organizationId: string, employeeId: string, productId: string, input: {
+  name: string;
+  categoryId: string;
+  cost: number;
+  price: number;
+  minStock: number;
+  active: boolean;
+}): Promise<Product> {
+  const { data, error } = await db()
+    .from("products")
+    .update({
+      name: input.name,
+      category_id: input.categoryId,
+      cost: input.cost,
+      price: input.price,
+      min_stock: input.minStock,
+      active: input.active,
+    })
+    .eq("id", productId)
+    .eq("organization_id", organizationId)
+    .select()
+    .single();
+  must(data, error);
+  await logAudit(organizationId, employeeId, "Producto editado", input.name);
+  return mapProduct(data);
+}
+
 export async function listExpenses(organizationId: string): Promise<Expense[]> {
   const { data, error } = await db().from("expenses").select("*").eq("organization_id", organizationId).order("date", { ascending: false });
   if (error) throw error;
