@@ -92,7 +92,7 @@ export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan:
         </select>
       </label>
 
-      <p className="mt-3 text-xs text-zinc-400">{plan.tagline}. 7 días gratis, sin tarjeta.</p>
+      <p className="mt-3 text-xs text-zinc-400">{plan.tagline}. Se paga con Mercado Pago después de crear la cuenta.</p>
 
       {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
@@ -101,7 +101,7 @@ export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan:
         disabled={pending || !canSubmit}
         className="mt-4 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
       >
-        {pending ? "Creando cuenta..." : "Empezar prueba gratis de 7 días"}
+        {pending ? "Creando cuenta..." : "Crear cuenta"}
       </button>
 
       <p className="mt-4 text-center text-xs text-zinc-400">

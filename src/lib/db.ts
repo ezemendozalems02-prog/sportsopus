@@ -219,8 +219,6 @@ async function generateUniqueSlug(name: string): Promise<string> {
   return `${base}-${n}`;
 }
 
-const TRIAL_DAYS = 7;
-
 export async function createOrganization(input: {
   name: string;
   ownerName: string;
@@ -238,17 +236,19 @@ export async function createOrganization(input: {
   }
 
   const slug = await generateUniqueSlug(input.name);
-  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  // Sin prueba gratis: la cuenta se crea pero queda bloqueada (mismo estado
+  // que "cancelada") hasta que el dueño elija y pague un plan real desde
+  // /admin/plan — ver computeAccessState/SubscriptionPaywall.
   const { data: orgRow, error: orgError } = await db()
     .from("organizations")
     .insert({
       name: input.name,
       slug,
       plan: input.planId,
-      subscription_status: "trialing",
+      subscription_status: "canceled",
       billing_email: input.ownerEmail,
-      trial_ends_at: trialEndsAt,
+      trial_ends_at: null,
     })
     .select()
     .single();
@@ -284,7 +284,7 @@ export async function createOrganization(input: {
 
   const organization = mapOrganization(orgRow);
   const owner = mapEmployee(empRow);
-  await logAudit(organization.id, owner.id, "Cuenta creada", `${organization.name} · plan ${input.planId} · prueba gratis ${TRIAL_DAYS} días`);
+  await logAudit(organization.id, owner.id, "Cuenta creada", `${organization.name} · plan ${input.planId} · pendiente de pago`);
 
   return { organization, owner };
 }

@@ -57,7 +57,7 @@ export function LoginForm() {
       <p className="mt-4 text-center text-xs text-zinc-400">
         ¿No tenés cuenta?{" "}
         <Link href="/planes" className="font-medium text-emerald-600 dark:text-emerald-400">
-          Empezar prueba gratis
+          Crear cuenta
         </Link>
       </p>
     </div>

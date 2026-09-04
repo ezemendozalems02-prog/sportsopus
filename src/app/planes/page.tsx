@@ -15,7 +15,7 @@ export default function PlanesPage() {
           Un plan para cada etapa de tu complejo
         </h1>
         <p className="mt-2 text-zinc-500 dark:text-zinc-400">
-          7 días de prueba gratis en cualquier plan. Sin tarjeta para empezar.
+          Registrate, elegí tu plan y pagalo con Mercado Pago para arrancar.
         </p>
 
         <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
@@ -57,16 +57,15 @@ export default function PlanesPage() {
                     : "border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 }`}
               >
-                Empezar prueba gratis
+                Crear cuenta
               </Link>
             </div>
           ))}
         </div>
 
         <p className="mt-8 text-xs text-zinc-400">
-          Cada cuenta que se registra arranca aislada, con su propio panel y su propio link de reserva. El cobro real
-          se procesa con Mercado Pago Suscripciones — todavía no conectado, así que el pago dentro de esta demo queda
-          simulado.
+          Cada cuenta que se registra arranca aislada, con su propio panel y su propio link de reserva. El cobro se
+          procesa con Mercado Pago Suscripciones — para acceder al panel hay que elegir y pagar un plan.
         </p>
       </div>
     </div>

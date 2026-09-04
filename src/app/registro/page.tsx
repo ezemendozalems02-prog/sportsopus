@@ -18,7 +18,7 @@ export default async function RegistroPage({
         <Link href="/planes" className="text-sm text-zinc-500 dark:text-zinc-400">
           ← Ver planes
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Empezá tu prueba gratis</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Creá tu cuenta</h1>
       </div>
       <SignupForm plans={plans} initialPlan={validPlan} />
     </div>

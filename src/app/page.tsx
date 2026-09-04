@@ -20,8 +20,8 @@ export default async function Home() {
             href="/registro"
             className="rounded-2xl border border-emerald-400 bg-emerald-600 p-6 text-left text-white transition hover:bg-emerald-700"
           >
-            <p className="text-lg font-semibold">Crear mi cuenta gratis</p>
-            <p className="mt-1 text-sm text-emerald-50">7 días de prueba, sin tarjeta</p>
+            <p className="text-lg font-semibold">Crear mi cuenta</p>
+            <p className="mt-1 text-sm text-emerald-50">Elegí tu plan y arrancá hoy</p>
           </Link>
           <Link
             href="/login"

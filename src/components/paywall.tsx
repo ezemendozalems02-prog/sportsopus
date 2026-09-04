@@ -8,8 +8,8 @@ const REASON_COPY: Record<string, { title: string; body: string }> = {
     body: "Elegí un plan para seguir usando SportControl — tus datos siguen todos ahí.",
   },
   canceled: {
-    title: "Tu suscripción está cancelada",
-    body: "Reactivala para volver a acceder al panel del negocio.",
+    title: "Activá tu plan para entrar",
+    body: "Elegí un plan y pagalo con Mercado Pago para acceder al panel del negocio.",
   },
   past_due: {
     title: "Hay un problema con tu pago",
