@@ -1,6 +1,7 @@
-import { listLowStockProducts, listProductCategories, listProducts } from "@/lib/db";
+import { listLowStockProducts, listProductCategories, listProducts, listSales } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
 import { formatCurrency } from "@/lib/format";
+import { addDaysISO, todayISO } from "@/lib/time";
 import { RestockButton } from "./restock-button";
 import { NewProductForm } from "./new-product-form";
 import { EditProductButton } from "./edit-product-button";
@@ -10,6 +11,18 @@ export default async function InventarioPage() {
   const categories = await listProductCategories(organizationId);
   const products = await listProducts(organizationId);
   const lowStock = await listLowStockProducts(organizationId);
+  const sales = await listSales(organizationId);
+
+  const since30d = addDaysISO(todayISO(), -30);
+  const soldLast30d: Record<string, number> = {};
+  const soldTotal: Record<string, number> = {};
+  for (const sale of sales) {
+    const recent = sale.createdAt.slice(0, 10) >= since30d;
+    for (const item of sale.items) {
+      soldTotal[item.productId] = (soldTotal[item.productId] ?? 0) + item.quantity;
+      if (recent) soldLast30d[item.productId] = (soldLast30d[item.productId] ?? 0) + item.quantity;
+    }
+  }
 
   return (
     <div>
@@ -34,6 +47,7 @@ export default async function InventarioPage() {
               <th className="px-3">Producto</th>
               <th className="px-3">Categoría</th>
               <th className="px-3">Stock</th>
+              <th className="px-3">Vendidos</th>
               <th className="px-3">Costo</th>
               <th className="px-3">Precio</th>
               <th className="px-3">Margen</th>
@@ -66,6 +80,10 @@ export default async function InventarioPage() {
                       {product.stock}
                     </span>
                     <span className="ml-1 text-xs text-zinc-400">/ mín {product.minStock}</span>
+                  </td>
+                  <td className="bg-white px-3 py-3 dark:bg-zinc-900">
+                    <p className="font-medium text-zinc-700 dark:text-zinc-300">{soldLast30d[product.id] ?? 0}</p>
+                    <p className="text-xs text-zinc-400">{soldTotal[product.id] ?? 0} en total</p>
                   </td>
                   <td className="bg-white px-3 py-3 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">{formatCurrency(product.cost)}</td>
                   <td className="bg-white px-3 py-3 font-medium text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50">
