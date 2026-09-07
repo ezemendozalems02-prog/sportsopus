@@ -457,6 +457,19 @@ export async function adminSetSubscriptionStatus(organizationId: string, status:
   return mapOrganization(must(data, error, "Organización no encontrada"));
 }
 
+// Única forma de dar prueba gratis hoy: la carga el superadmin a mano, con
+// la cantidad de días que elija — el alta pública (createOrganization) ya no
+// otorga ninguna por defecto.
+export async function adminGrantTrial(organizationId: string, days: number): Promise<Organization> {
+  const { data, error } = await db()
+    .from("organizations")
+    .update({ subscription_status: "trialing", trial_ends_at: addDaysISO(todayISO(), days) })
+    .eq("id", organizationId)
+    .select()
+    .single();
+  return mapOrganization(must(data, error, "Organización no encontrada"));
+}
+
 // ---------------------------------------------------------------------------
 // Billing / acceso por plan
 // ---------------------------------------------------------------------------

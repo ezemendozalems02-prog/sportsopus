@@ -8,6 +8,7 @@ import {
   addExpense,
   adjustStock,
   adminChangePlan,
+  adminGrantTrial,
   adminSetSubscriptionStatus,
   cancelSubscription,
   changePlan,
@@ -464,6 +465,13 @@ export async function superadminChangePlanAction(organizationId: string, planId:
 export async function superadminSetStatusAction(organizationId: string, status: SubscriptionStatus) {
   await requireSuperadminSession();
   await adminSetSubscriptionStatus(organizationId, status);
+  revalidatePath("/superadmin/organizaciones");
+  revalidatePath(`/superadmin/organizaciones/${organizationId}`);
+}
+
+export async function superadminGrantTrialAction(organizationId: string, days: number) {
+  await requireSuperadminSession();
+  await adminGrantTrial(organizationId, days);
   revalidatePath("/superadmin/organizaciones");
   revalidatePath(`/superadmin/organizaciones/${organizationId}`);
 }
