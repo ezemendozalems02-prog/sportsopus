@@ -9,7 +9,7 @@ import {
   listEmployees,
   listPlans,
 } from "@/lib/db";
-import { SUBSCRIPTION_STATUS_LABELS, formatUsd } from "@/lib/format";
+import { SUBSCRIPTION_STATUS_LABELS, formatCurrency } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { OrgControls } from "./controls";
 
@@ -105,7 +105,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ orgI
             {invoices.map((inv) => (
               <div key={inv.id} className="flex justify-between">
                 <span className="text-zinc-300">{formatDateLong(inv.periodStart)}</span>
-                <span className="text-zinc-500">{formatUsd(inv.amountUSD)} · {inv.status}</span>
+                <span className="text-zinc-500">{formatCurrency(inv.amountARS)} · {inv.status}</span>
               </div>
             ))}
             {invoices.length === 0 && <p className="text-zinc-500">Sin facturas todavía.</p>}

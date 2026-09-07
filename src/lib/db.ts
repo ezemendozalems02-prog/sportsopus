@@ -51,38 +51,39 @@ function formatArs(amount: number) {
 // Planes (catálogo en código, no en tabla — ver 0004_saas.sql)
 // ---------------------------------------------------------------------------
 
-// Dólar blue de referencia al conectar Mercado Pago (2026-09-04) — fijo por
-// ahora, ver nota en changePlanAction/PLANS sobre actualizarlo a futuro.
+// Dólar blue de referencia — usado solo para el priceUSD aproximado que
+// aparece en reportes internos (MRR de superadmin, historial de facturas).
+// El precio real que paga el cliente es el ARS fijo de cada plan (priceARS).
 const USD_TO_ARS = 1540;
 
 // mpPreapprovalPlanId/mpCheckoutUrl: planes de suscripción reales creados en
 // Mercado Pago (app "SportControl", id 3613866164034514) — cobran el monto
-// en ARS de auto_recurring de cada uno (ver USD_TO_ARS arriba). Recreados con
-// credenciales de PRODUCCIÓN el 2026-09-04, ya activadas.
+// fijo en ARS de auto_recurring de cada uno, que es priceARS acá abajo.
+// Recreados con precios redondos en ARS el 2026-09-07.
 const PLANS: Plan[] = [
   {
-    id: "starter", name: "Starter", priceUSD: 27,
+    id: "starter", name: "Starter", priceARS: 27000, priceUSD: Math.round(27000 / USD_TO_ARS),
     tagline: "Para arrancar a ordenar las reservas",
     featureGroups: [],
     highlights: ["Reservas online con seña", "Agenda y canchas", "Clientes", "Facturación semanal de canchas"],
-    mpPreapprovalPlanId: "95ffea56607c4fcd8b5a132ea92f47d0",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=95ffea56607c4fcd8b5a132ea92f47d0",
+    mpPreapprovalPlanId: "ecdaed23094c4208b52cdf1def4e359e",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=ecdaed23094c4208b52cdf1def4e359e",
   },
   {
-    id: "pro", name: "Pro", priceUSD: 57,
+    id: "pro", name: "Pro", priceARS: 87000, priceUSD: Math.round(87000 / USD_TO_ARS),
     tagline: "Para manejar todo el día a día del complejo",
     featureGroups: ["operacion"],
     highlights: ["Todo lo de Starter", "Caja y punto de venta", "Inventario y gastos", "Empleados y auditoría"],
-    mpPreapprovalPlanId: "a9450ac9d51b47ca9a77b08c355e54d0",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=a9450ac9d51b47ca9a77b08c355e54d0",
+    mpPreapprovalPlanId: "12f693a7a6fc45f599783f65227df15f",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=12f693a7a6fc45f599783f65227df15f",
   },
   {
-    id: "business", name: "Business", priceUSD: 97,
+    id: "business", name: "Business", priceARS: 137000, priceUSD: Math.round(137000 / USD_TO_ARS),
     tagline: "Para crecer con torneos, fidelización y datos",
     featureGroups: ["operacion", "crecimiento", "inteligencia"],
     highlights: ["Todo lo de Pro", "Torneos, ranking y fidelización", "Promociones y lista de espera", "Analítica, alertas y reportes"],
-    mpPreapprovalPlanId: "762bd559cce046dcb2a16ad0576de626",
-    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=762bd559cce046dcb2a16ad0576de626",
+    mpPreapprovalPlanId: "b10a2444b1dc4539b49c7f5728572d02",
+    mpCheckoutUrl: "https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=b10a2444b1dc4539b49c7f5728572d02",
   },
 ];
 
@@ -96,10 +97,6 @@ export function getPlan(planId: PlanId): Plan | undefined {
 
 export function getPlanByMpPreapprovalPlanId(mpPreapprovalPlanId: string): Plan | undefined {
   return PLANS.find((p) => p.mpPreapprovalPlanId === mpPreapprovalPlanId);
-}
-
-export function priceInArs(priceUSD: number): number {
-  return priceUSD * USD_TO_ARS;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +408,7 @@ export interface PlatformStats {
   pastDueCount: number;
   canceledCount: number;
   trialsEndingSoon: number;
-  mrrUSD: number;
+  mrrARS: number;
   planDistribution: { planId: PlanId; count: number }[];
   totalCustomers: number;
   activeCustomers: number;
@@ -425,9 +422,9 @@ export async function getPlatformStats(): Promise<PlatformStats> {
     const daysLeft = (new Date(o.trialEndsAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
     return daysLeft >= 0 && daysLeft <= 3;
   }).length;
-  const mrrUSD = organizations
+  const mrrARS = organizations
     .filter((o) => o.subscriptionStatus === "active")
-    .reduce((sum, o) => sum + (getPlan(o.plan)?.priceUSD ?? 0), 0);
+    .reduce((sum, o) => sum + (getPlan(o.plan)?.priceARS ?? 0), 0);
   const planDistribution = PLANS.map((p) => ({
     planId: p.id,
     count: organizations.filter((o) => o.plan === p.id).length,
@@ -443,7 +440,7 @@ export async function getPlatformStats(): Promise<PlatformStats> {
     pastDueCount: byStatus("past_due"),
     canceledCount: byStatus("canceled"),
     trialsEndingSoon,
-    mrrUSD,
+    mrrARS,
     planDistribution,
     totalCustomers,
     activeCustomers,
@@ -1670,11 +1667,11 @@ export async function activateSubscription(organizationId: string, employeeId: s
   must(data, error);
 
   await db().from("billing_invoices").insert({
-    organization_id: organizationId, plan: plan.id, amount_usd: plan.priceUSD, status: "pagada",
+    organization_id: organizationId, plan: plan.id, amount_usd: plan.priceARS, status: "pagada",
     period_start: todayISO(), period_end: currentPeriodEnd,
   });
 
-  await logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — USD ${plan.priceUSD}/mes`);
+  await logAudit(organizationId, employeeId, "Suscripción activada", `Plan ${plan.name} — ${plan.priceARS} ARS/mes`);
   return mapOrganization(data);
 }
 
@@ -1720,7 +1717,7 @@ export async function syncMercadoPagoSubscription(
     const plan = getPlan(planId);
     if (plan) {
       await db().from("billing_invoices").insert({
-        organization_id: organizationId, plan: plan.id, amount_usd: plan.priceUSD, status: "pagada",
+        organization_id: organizationId, plan: plan.id, amount_usd: plan.priceARS, status: "pagada",
         period_start: todayISO(), period_end: addDaysISO(todayISO(), 30),
       });
     }

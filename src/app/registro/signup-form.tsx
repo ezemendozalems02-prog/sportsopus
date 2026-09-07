@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { signupAction } from "@/lib/actions";
-import { formatUsd } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 import type { Plan, PlanId } from "@/lib/types";
 
 export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan: PlanId }) {
@@ -86,7 +86,7 @@ export function SignupForm({ plans, initialPlan }: { plans: Plan[]; initialPlan:
         >
           {plans.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} — {formatUsd(p.priceUSD)}/mes
+              {p.name} — {formatCurrency(p.priceARS)}/mes
             </option>
           ))}
         </select>

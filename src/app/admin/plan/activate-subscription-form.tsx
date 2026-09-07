@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { activateSubscriptionAction } from "@/lib/actions";
+import { formatCurrency } from "@/lib/format";
 import type { Plan } from "@/lib/types";
 
 export function ActivateSubscriptionForm({ plan, defaultEmail }: { plan: Plan; defaultEmail: string }) {
@@ -14,7 +15,7 @@ export function ActivateSubscriptionForm({ plan, defaultEmail }: { plan: Plan; d
     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
       <p className="font-medium text-emerald-800 dark:text-emerald-300">Activar suscripción ahora</p>
       <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">
-        Plan {plan.name} — USD {plan.priceUSD}/mes. Pago simulado con Mercado Pago Suscripciones (siempre aprobado, todavía sin credenciales reales conectadas).
+        Plan {plan.name} — {formatCurrency(plan.priceARS)}/mes. Pago simulado, sin pasar por Mercado Pago (para activar manualmente sin esperar el checkout real).
       </p>
       <input
         type="email"
@@ -33,7 +34,7 @@ export function ActivateSubscriptionForm({ plan, defaultEmail }: { plan: Plan; d
         disabled={pending || !email}
         className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
       >
-        {pending ? "Procesando..." : `Pagar USD ${plan.priceUSD}/mes`}
+        {pending ? "Procesando..." : `Activar sin Mercado Pago (${formatCurrency(plan.priceARS)}/mes)`}
       </button>
     </div>
   );

@@ -1,6 +1,6 @@
-import { computeAccessState, getOrganizationById, getPlan, linkMercadoPagoReturn, listBillingInvoices, listPlans, priceInArs } from "@/lib/db";
+import { computeAccessState, getOrganizationById, getPlan, linkMercadoPagoReturn, listBillingInvoices, listPlans } from "@/lib/db";
 import { requireEmployeeSession } from "@/lib/session";
-import { formatCurrency, formatUsd, SUBSCRIPTION_STATUS_LABELS } from "@/lib/format";
+import { formatCurrency, SUBSCRIPTION_STATUS_LABELS } from "@/lib/format";
 import { formatDateLong } from "@/lib/time";
 import { Card } from "@/components/ui";
 import { ChangePlanButton } from "./change-plan-button";
@@ -39,9 +39,8 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-medium text-zinc-900 dark:text-zinc-50">
-              Plan {currentPlan?.name} — {formatUsd(currentPlan?.priceUSD ?? 0)}/mes
+              Plan {currentPlan?.name} — {formatCurrency(currentPlan?.priceARS ?? 0)}/mes
             </p>
-            <p className="text-xs text-zinc-400">≈ {formatCurrency(priceInArs(currentPlan?.priceUSD ?? 0))}/mes vía Mercado Pago</p>
           </div>
           <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_COLORS[statusMeta.color]}`}>
             {statusMeta.label}
@@ -80,12 +79,10 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
           <Card key={plan.id} className={plan.id === org.plan ? "border-emerald-400" : ""}>
             <p className="font-medium text-zinc-900 dark:text-zinc-50">{plan.name}</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-              {formatUsd(plan.priceUSD)}
+              {formatCurrency(plan.priceARS)}
               <span className="text-sm font-normal text-zinc-400">/mes</span>
             </p>
-            <p className="mt-1 text-xs text-zinc-400">
-              {plan.tagline} · ≈ {formatCurrency(priceInArs(plan.priceUSD))}/mes
-            </p>
+            <p className="mt-1 text-xs text-zinc-400">{plan.tagline}</p>
             <ul className="mt-4 flex flex-col gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
               {plan.highlights.map((h) => (
                 <li key={h} className="flex gap-2">
@@ -120,7 +117,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
               <p className="text-xs text-zinc-400">Plan {invoice.plan}</p>
             </div>
             <div className="text-right">
-              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{formatUsd(invoice.amountUSD)}</p>
+              <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(invoice.amountARS)}</p>
               <p className="text-xs capitalize text-zinc-400">{invoice.status}</p>
             </div>
           </Card>

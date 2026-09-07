@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listPlans } from "@/lib/db";
-import { formatUsd } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 
 export default function PlanesPage() {
   const plans = listPlans();
@@ -35,7 +35,7 @@ export default function PlanesPage() {
               )}
               <p className="font-medium text-zinc-900 dark:text-zinc-50">{plan.name}</p>
               <p className="mt-1 text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
-                {formatUsd(plan.priceUSD)}
+                {formatCurrency(plan.priceARS)}
                 <span className="text-sm font-normal text-zinc-400">/mes</span>
               </p>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{plan.tagline}</p>

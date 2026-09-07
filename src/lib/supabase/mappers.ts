@@ -315,7 +315,7 @@ export function mapBillingInvoice(r: Row): BillingInvoice {
     id: r.id,
     organizationId: r.organization_id,
     plan: r.plan,
-    amountUSD: Number(r.amount_usd),
+    amountARS: Number(r.amount_usd),
     status: r.status,
     periodStart: r.period_start,
     periodEnd: r.period_end,

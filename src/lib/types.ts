@@ -344,7 +344,8 @@ export type PlanFeatureGroup = "operacion" | "crecimiento" | "inteligencia";
 export interface Plan {
   id: PlanId;
   name: string;
-  priceUSD: number;
+  priceARS: number;
+  priceUSD: number; // referencia aproximada, usada solo en reportes internos
   tagline: string;
   featureGroups: PlanFeatureGroup[]; // qué secciones del panel desbloquea
   highlights: string[]; // bullets para la página de precios
@@ -358,7 +359,7 @@ export interface BillingInvoice {
   id: string;
   organizationId: string;
   plan: PlanId;
-  amountUSD: number;
+  amountARS: number;
   status: InvoiceStatus;
   periodStart: string;
   periodEnd: string;

@@ -1,5 +1,5 @@
 import { getPlatformStats, listOrgSummaries } from "@/lib/db";
-import { formatUsd } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 import Link from "next/link";
 
 const PLAN_LABELS: Record<string, string> = { starter: "Starter", pro: "Pro", business: "Business" };
@@ -23,7 +23,7 @@ export default async function SuperadminDashboardPage() {
 
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Organizaciones" value={String(stats.totalOrgs)} />
-        <StatCard label="MRR (planes activos)" value={formatUsd(stats.mrrUSD)} />
+        <StatCard label="MRR (planes activos)" value={formatCurrency(stats.mrrARS)} />
         <StatCard label="En prueba gratis" value={String(stats.trialingCount)} />
         <StatCard label="Prueba vence en ≤3 días" value={String(stats.trialsEndingSoon)} />
       </div>
